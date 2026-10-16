@@ -47,7 +47,7 @@ function windowRows(w, t) {
   ];
 }
 const TASK_ROWS = [
-  { id: 'mutualScan', t: '03:20', cat: '系统运维', name: '互关粉丝占比扫描', unit: '次', status: 'on', set: '1 次/号（全量粉丝，你拍板凌晨2-5点）', setNum: 1, sug: '1/天·凌晨低峰（你定的时间窗；只读滚动不加动作，无频次风险）', desc: 'followers-scan.js 翻自己粉丝列表数互关，喂数据页"互关粉丝占比"格（含 0-90 分钟随机延迟）' },
+  { id: 'mutualScan', t: '03:20', cat: '系统运维', name: '互关粉丝占比扫描', unit: '次', status: 'on', set: '1 次/号·每周一/周四（10-18 拍板降频：旧分子÷新分母口径）', setNum: null, sug: '2 次/周+漂移±10%自动补扫（互关数是慢变量，占比格每天用最新粉丝数重算，无需日扫）', desc: 'followers-scan 全量扫描仅周一/周四凌晨；每天 09:00 健康日检发现粉丝漂移±10%自动补扫该号' },
   { id: 'health', t: '09:00', cat: '系统运维', name: '健康日检', unit: '次', status: 'on', set: '1 次', setNum: 1, sug: '1/天（radar 方法论：四项检测每日至少一检）', desc: 'FxTwitter 匿名三通道，喂六宫格/两图' },
   { id: 'radar', t: '09:10', cat: '系统运维', name: '限流雷达', unit: '次', status: 'on', set: '1 次（双号）', setNum: 1, sug: '1/天（shadowbanradar 免费档 30 次/天内充裕；过多检测无增益）', desc: 'shadowbanradar 渲染通道，四维度判定+分数' },
   { id: 'scan', t: '09:35', cat: '系统运维', name: '关系池扫描', unit: '次', status: 'on', set: '1 次/8屏', setNum: 1, sug: '1/天（只读零风险；同日重复扫描无增量收益——通知已去重）', desc: '只读扫通知页喂关系池' },
@@ -176,7 +176,9 @@ function buildData() {
     const tE = todayKey ? hist[todayKey] : null;
     const pE = prevKey ? hist[prevKey] : null;
     const P = (tE && tE.profile) || {};
-    const S = (tE && tE.statuses) || {};
+    // 慢变量"上次已知值"语义（10-18 用户拍板）：日更格在今天快照缺该字段时（如轻检日），回溯最近含该字段的快照，不再显示"—"
+    const Sdate = [...dates].reverse().find((d) => hist[d] && hist[d].statuses && hist[d].statuses.ownCount != null);
+    const S = Sdate ? hist[Sdate].statuses : ((tE && tE.statuses) || {});
     // 账号名称（X 昵称）：从最近含 name 的快照取（health.js 10-16 起记录），取不到回退内部 key
     const acctName = (() => { for (let i = dates.length - 1; i >= 0; i--) { const n = hist[dates[i]] && hist[dates[i]].profile && hist[dates[i]].profile.name; if (n) return n; } return null; })();
     const followers = P.followers ?? null, following = P.following ?? null;
@@ -185,18 +187,22 @@ function buildData() {
       { label: '关注量', val: following, ...fmtDelta(following, pE && pE.profile ? pE.profile.following : null) },
       { label: '关注/粉丝比', val: followers > 0 && following != null ? (following / followers).toFixed(2) : '—', txt: '健康线 ≤' + CFG.follow.ratioGuard.maxRatio, cls: 'flat', isRatio: true },
       { label: '原创帖(累计)', val: P.statuses ?? null, ...fmtDelta(P.statuses ?? null, pE && pE.profile ? pE.profile.statuses ?? null : null) },
-      { label: '回复(近48h)', val: S.ownCount ?? null, ...fmtDelta(S.ownCount ?? null, pE && pE.statuses ? pE.statuses.ownCount ?? null : null) },
-      // 互关粉丝占比（10-16 用户定，替换原"转发(近48h)"格）：凌晨2-5点 followers-scan.js 只读扫描，关注回去的粉丝/粉丝总数
+      (() => { const m = { label: '回复(近48h)', val: S.ownCount ?? null, ...fmtDelta(S.ownCount ?? null, pE && pE.statuses ? pE.statuses.ownCount ?? null : null) }; if (S.ownCount != null && Sdate && Sdate !== todayKey) m.txt = (m.txt && m.txt !== '—' ? m.txt + ' · ' : '') + '截至' + Sdate.slice(5); return m; })(),
+      // 互关粉丝占比（10-18 用户拍板新口径）：**旧分子÷新分母**=最近一次扫描的互关数 ÷ 今日最新粉丝总数
+      // 分子（互关数）是慢变量，每周一/周四凌晨全量扫描+漂移±10%触发补扫；分母每天 09:00 健康日检免费更新
       (() => {
-        const MU = tE && tE.mutual, MP = pE && pE.mutual;
-        const rNow = MU ? +(MU.ratio * 100).toFixed(1) : null;
-        const rPrev = MP ? +(MP.ratio * 100).toFixed(1) : null;
+        const MUdates = [...dates].reverse().filter((d) => hist[d] && hist[d].mutual);
+        const MUd = MUdates[0], MPd = MUdates[1];
+        const MU = MUd ? hist[MUd].mutual : null, MP = MPd ? hist[MPd].mutual : null;
+        const rNow = (MU && followers > 0) ? +((MU.mutual / followers) * 100).toFixed(1) : null;
+        const rPrev = (MP && MPd && hist[MPd].profile && hist[MPd].profile.followers > 0) ? +((MP.mutual / hist[MPd].profile.followers) * 100).toFixed(1) : null;
+        const asOf = MUd ? '截至' + MUd.slice(5) : '';
         let d = { txt: '—', cls: 'flat' };
         if (rNow != null && rPrev != null) {
           const pp = +(rNow - rPrev).toFixed(1);
-          d = pp === 0 ? { txt: `±0 · ${MU.mutual}/${MU.scanned}`, cls: 'flat' }
-            : { txt: `${pp > 0 ? '▲ +' : '▼ '}${pp}pp · ${MU.mutual}/${MU.scanned}`, cls: pp > 0 ? 'up' : 'down' };
-        } else if (rNow != null) d = { txt: `${MU.mutual}/${MU.scanned}${MU.scanned < 20 ? ' · 样本过小' : (MU.coverage != null && MU.coverage < 100 ? ' · 扫' + MU.coverage + '%' : '')}`, cls: 'flat' };
+          d = pp === 0 ? { txt: `${MU.mutual}/${followers} · ${asOf}`, cls: 'flat' }
+            : { txt: `${pp > 0 ? '▲ +' : '▼ '}${pp}pp · ${MU.mutual}/${followers} · ${asOf}`, cls: pp > 0 ? 'up' : 'down' };
+        } else if (rNow != null) d = { txt: `${MU.mutual}/${followers}${MU.scanned < 20 ? ' · 样本过小' : ''} · ${asOf}`, cls: 'flat' };
         return { label: '互关粉丝占比', val: rNow != null ? rNow + '%' : null, isRatio: true, ...d };
       })(),
     ];

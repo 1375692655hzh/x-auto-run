@@ -112,6 +112,12 @@ async function scanAccount(acct, snapshot) {
       fs.mkdirSync(path.dirname(snapPath), { recursive: true });
       fs.writeFileSync(snapPath, JSON.stringify(snap, null, 2));
       logLine({ task: 'mutualScan', account: acct.key, action: 'scan', scanned: res.scanned, mutual: res.mutual, ratio: res.ratio, coverage: res.coverage });
+      // lastScan 状态（10-18 拍板）：供 health.js 漂移±10% 触发补扫判断
+      const stPath = path.join(STATE_DIR, 'mutual-scan-state.json');
+      const mst = (() => { try { return JSON.parse(fs.readFileSync(stPath, 'utf8')); } catch { return {}; } })();
+      mst.lastScan = mst.lastScan || {};
+      mst.lastScan[acct.key] = { date: today(), followers: res.followersTotal, mutual: res.mutual };
+      fs.writeFileSync(stPath, JSON.stringify(mst, null, 2));
       LOG(`@${acct.handle}: 互关 ${res.mutual}/${res.scanned}（占比 ${(res.ratio * 100).toFixed(1)}%，覆盖 ${res.coverage}%）已写入快照`);
     } catch (e) {
       LOG(`@${acct.handle} 失败/跳过: ${String(e.message).slice(0, 120)}`);
