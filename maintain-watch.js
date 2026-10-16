@@ -20,7 +20,7 @@ const QUEUE_DIR = path.join(ROOT, 'queue');
 const M = CFG.maintain || {};
 const L = CFG.limits || {};
 const DRY = process.argv.includes('--dry');
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }; // 本地(北京)日期——曾用 UTC 致凌晨任务写错日（10-17 互关扫描写入昨日快照，Codex 抓出）
 const nowIso = () => new Date().toISOString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LOG = (s) => console.log(`[${new Date().toTimeString().slice(0, 8)}] ${s}`);
@@ -137,6 +137,7 @@ function consumeReprobeFlag() {
   st.lastRun = nowIso();
   const acctByKey = Object.fromEntries(CFG.accounts.map((a) => [a.key, a]));
   const perAcct = {}; // acct -> entries[]
+  const seqBase = {}; // acct -> id 续编基数（从现有 maintain 队列长度起，防跨轮撞 id——Kimi 评审抓出）
   let notes = [];
 
   let pollOkAll = true;
@@ -179,8 +180,8 @@ function consumeReprobeFlag() {
       const remainMin = Math.max(5, Math.round((M.goldenMaxMin || 180) - (now - p.postAt) / 60000));
       const base = { kind: 'maintain', statusId: p.statusId, postUrl: `https://x.com/${tAcct.handle}/status/${p.statusId}`, targetHandle: tAcct.handle, postAt: p.postAt, createdAt: nowIso(), ttlMin: remainMin, status: 'planned' };
       perAcct[by] = perAcct[by] || [];
-      let idSeq = perAcct[by].length;
-      perAcct[by].push({ id: `m-${today()}-${by}-${++idSeq}`, type: 'like', ...base });
+      const nextId = () => `m-${today()}-${by}-${(seqBase[by] = (seqBase[by] != null ? seqBase[by] : (seqBase[by] = readJson(path.join(QUEUE_DIR, `maintain-${today()}-${by}.json`), []).length)) + 1)}`;
+      perAcct[by].push({ id: nextId(), type: 'like', ...base });
       appendMLed({ account: by, action: 'like', statusId: p.statusId, targetHandle: tAcct.handle });
       // butcher 对 Owen 的低频回复（48h 间隔；LLM+质量门，失败不凑数）
       if (by === 'butcher' && (mCfg.actions || []).includes('reply') && Date.now() - lastReplyAt('butcher', tAcct.handle) > (M.replyMinGapHours || 48) * 3600000 && natural >= 5) {
@@ -189,7 +190,7 @@ function consumeReprobeFlag() {
         const r = await generateReply({ post: p.text, author: tAcct.handle, persona, brief }).catch(() => null);
         const qc = r && r.text ? quality.check(r.text, {}) : null;
         if (qc && qc.ok) {
-          perAcct[by].push({ id: `m-${today()}-${by}-${++idSeq}`, type: 'reply', text: qc.cleaned, ...base });
+          perAcct[by].push({ id: nextId(), type: 'reply', text: qc.cleaned, ...base });
           appendMLed({ account: by, action: 'reply', statusId: p.statusId, targetHandle: tAcct.handle });
         } else {
           notes.push(`帖${p.statusId.slice(-6)} 回复生成未过质量门(${qc ? qc.reason : 'LLM失败'})，只点赞`);

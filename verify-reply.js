@@ -14,7 +14,7 @@ const API = 'https://api.fxtwitter.com';
 const HANDLE = (CFG.accounts.find((a) => a.key === 'butcher') || {}).handle || 'MarketButcher88';
 const argv = process.argv.slice(2);
 const WIN = ((argv.find((a) => a.startsWith('--window=')) || '').slice('--window='.length) || 'am');
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }; // 本地(北京)日期——曾用 UTC 致凌晨任务写错日（10-17 互关扫描写入昨日快照，Codex 抓出）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LOG = (s) => console.log(`[${new Date().toTimeString().slice(0, 8)}] ${s}`);
 function readJson(p, d) { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return d; } }

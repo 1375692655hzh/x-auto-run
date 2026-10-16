@@ -423,8 +423,15 @@ function executeAction(page, entry) {
       let r;
       if (e.type === 'reply' && e.followFirst) {
         const fr = await (SIMULATE ? Promise.resolve({ ok: true, simulated: true }) : followUser(page, e.targetHandle));
-        if (fr.ok) { syncContacts(e, 'follow'); ledgerRecord('follow'); } // 先关注同样计入滚动关注账本（2026-10-16 修复：此前漏记）
-        log({ action: 'execute', id: e.id + '-follow', type: 'follow', target: e.targetHandle, status: fr.ok ? 'done' : 'unknown', note: '互关先关注' });
+        log({ action: 'execute', kind: e.kind || undefined, id: e.id + '-follow', type: 'follow', target: e.targetHandle, status: fr.ok ? 'done' : 'unknown', note: '互关先关注' });
+        if (!fr.ok) {
+          // 先关注失败则不发回复（Kimi 评审抓出：文案口径"可如实说已关注"，关注没成仍回复=虚假表述风险）
+          ledgerRecord('follow');
+          e.status = 'skipped'; e.result = '先关注未成功，跳过回复（防"已关注"虚假表述）'; stats.skipped.push(e.id);
+          saveQueue(queue);
+          continue;
+        }
+        syncContacts(e, 'follow'); ledgerRecord('follow'); // 先关注同样计入滚动关注账本（2026-10-16 修复：此前漏记）
         await gsleep(X.followFirstGapGaussMs);
       }
       r = await executeAction(page, e).catch((err) => ({ ok: false, note: err.message }));
