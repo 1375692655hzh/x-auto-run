@@ -60,7 +60,7 @@ try {
   if (snap) {
     const parts = Object.values(snap.accounts || {}).map((e) => {
       const icon = e.verdict === 'green' ? '🟢' : e.verdict === 'suspended' ? '🔴' : '⚪(未知)';
-      return `${icon} @${e.handle} ${e.verdict}（粉丝 ${e.profile.followers ?? '?'}，48h 自发 ${e.statuses.ownCount ?? '?'}，敏感 ${e.statuses.sensitiveCount ?? 0}）`;
+      return `${icon} @${e.handle} ${e.verdict}（粉丝 ${e.profile.followers ?? '?'}，24h 回复 ${e.statuses.ownCount ?? '?'}，敏感 ${e.statuses.sensitiveCount ?? 0}）`;
     });
     if (parts.length) health = parts.join('\n');
     // v1.1 C7b：雷达四维 + 互关占比两行（数据已在快照里）

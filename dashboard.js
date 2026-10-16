@@ -187,7 +187,7 @@ function buildData() {
       { label: '关注量', val: following, ...fmtDelta(following, pE && pE.profile ? pE.profile.following : null) },
       { label: '关注/粉丝比', val: followers > 0 && following != null ? (following / followers).toFixed(2) : '—', txt: '健康线 ≤' + CFG.follow.ratioGuard.maxRatio, cls: 'flat', isRatio: true },
       { label: '原创帖(累计)', val: P.statuses ?? null, ...fmtDelta(P.statuses ?? null, pE && pE.profile ? pE.profile.statuses ?? null : null) },
-      (() => { const m = { label: '回复(近48h)', val: S.ownCount ?? null, ...fmtDelta(S.ownCount ?? null, pE && pE.statuses ? pE.statuses.ownCount ?? null : null) }; if (S.ownCount != null && Sdate && Sdate !== todayKey) m.txt = (m.txt && m.txt !== '—' ? m.txt + ' · ' : '') + '截至' + Sdate.slice(5); return m; })(),
+      (() => { const m = { label: '回复(近24h)', val: S.ownCount ?? null, ...fmtDelta(S.ownCount ?? null, pE && pE.statuses ? pE.statuses.ownCount ?? null : null) }; if (S.ownCount != null && Sdate && Sdate !== todayKey) m.txt = (m.txt && m.txt !== '—' ? m.txt + ' · ' : '') + '截至' + Sdate.slice(5); return m; })(),
       // 互关粉丝占比（10-18 用户拍板新口径）：**旧分子÷新分母**=最近一次扫描的互关数 ÷ 今日最新粉丝总数
       // 分子（互关数）是慢变量，每周一/周四凌晨全量扫描+漂移±10%触发补扫；分母每天 09:00 健康日检免费更新
       (() => {

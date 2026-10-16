@@ -43,7 +43,7 @@ else {
     const own = e.statuses.ownCount ?? '?';
     const rp = e.statuses.repostCount ?? '?';
     const sens = e.statuses.sensitiveCount ?? '?';
-    line(`   粉丝 ${e.profile.followers ?? '?'}${fd} · 48h 自发 ${own} 条 + 转发 ${rp} · 最新动作 ${hm(e.statuses.newestAt)} · 敏感标记 ${sens} · 建议索引 ${e.typeahead.found ? '收录' : '未收录'}`);
+    line(`   粉丝 ${e.profile.followers ?? '?'}${fd} · 24h 回复 ${own} 条 + 转发 ${rp} · 最新动作 ${hm(e.statuses.newestAt)} · 敏感标记 ${sens} · 建议索引 ${e.typeahead.found ? '收录' : '未收录'}`);
   }
 }
 

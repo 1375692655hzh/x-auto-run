@@ -113,7 +113,7 @@ function digestTypeahead(res, handle) {
     await sleep(1500);
     let s = { state: 'skipped' }, t = { state: 'skipped' };
     if (!LIGHT) {
-      const since = Math.floor(Date.now() / 1000 - 48 * 3600);
+      const since = Math.floor(Date.now() / 1000 - 24 * 3600); // 24h 窗口（10-18 用户拍板：回复数口径 48h→24h）
       s = digestStatuses(await getJSON(`${API}/2/profile/${h}/statuses?with_replies=1&since=${since}`), h);
       await sleep(1500);
       t = digestTypeahead(await getJSON(`${API}/2/typeahead?q=${encodeURIComponent(h)}&result_type=users`), h);
