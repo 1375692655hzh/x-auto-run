@@ -12,3 +12,4 @@ node_modules/
 
 # 调试截图
 debug-*.png
+content-source.json
