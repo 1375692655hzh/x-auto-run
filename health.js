@@ -3,7 +3,7 @@
 // 用法: node health.js [--accounts=butcher,fullwin]（默认 config.accounts 全部）
 // 通道（2026-10-15）:
 //   1. FxTwitter /2/profile/<handle>        存活 / 粉丝关注数（封禁返回 404 reason=suspended）
-//   2. FxTwitter /2/profile/<handle>/statuses  近 48h 发帖数 / 最新帖时间（发帖中断=异常线索）
+//   2. FxTwitter /2/profile/<handle>/statuses  近 24h 回复数 / 最新帖时间（发帖中断=异常线索；10-18 用户拍板 48h→24h）
 //   3. FxTwitter /2/typeahead               建议索引是否收录（suggestion ban 软信号，仅记录）
 // 语义: 任一通道失败/数据缺失 = unknown —— 不计健康也不计异常（审计纠偏：检测失败≠被限流）。
 //       本版不做异常判定与自动处置，只记录快照与环比，供周复盘与 P4 控制器使用。
@@ -135,13 +135,13 @@ function digestTypeahead(res, handle) {
     if (pv) {
       entry.delta = {
         followers: (p.followers ?? null) !== null && (pv.profile.followers ?? null) !== null ? p.followers - pv.profile.followers : null,
-        posts48h: s.count ?? null,
-        prevPosts48h: pv.statuses.count ?? null,
+        posts24h: s.count ?? null,
+        prevPosts24h: pv.statuses.count ?? null,
       };
     }
     // 合并更新：保留其他任务写进该账号条目的字段（如 followers-scan 的 mutual、radar 相关），不整体覆盖（10-16 教训）
     snap.accounts[key] = { ...(snap.accounts[key] || {}), ...entry };
-    report[key] = { verdict: entry.verdict, followers: p.followers, own48h: s.ownCount, reposts48h: s.repostCount, newestAt: s.newestAt, minViews: s.minViews, sensitive: s.sensitiveCount, typeaheadFound: t.found, delta: entry.delta };
+    report[key] = { verdict: entry.verdict, followers: p.followers, own24h: s.ownCount, reposts24h: s.repostCount, newestAt: s.newestAt, minViews: s.minViews, sensitive: s.sensitiveCount, typeaheadFound: t.found, delta: entry.delta };
   }
 
   snap.checkedAt = new Date().toISOString();

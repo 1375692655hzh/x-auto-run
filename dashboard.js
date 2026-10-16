@@ -51,8 +51,8 @@ const TASK_ROWS = [
   { id: 'health', t: '09:00', cat: '系统运维', name: '健康日检', unit: '次', status: 'on', set: '1 次', setNum: 1, sug: '1/天（radar 方法论：四项检测每日至少一检）', desc: 'FxTwitter 匿名三通道，喂六宫格/两图' },
   { id: 'radar', t: '09:10', cat: '系统运维', name: '限流雷达', unit: '次', status: 'on', set: '1 次（双号）', setNum: 1, sug: '1/天（shadowbanradar 免费档 30 次/天内充裕；过多检测无增益）', desc: 'shadowbanradar 渲染通道，四维度判定+分数' },
   { id: 'scan', t: '09:35', cat: '系统运维', name: '关系池扫描', unit: '次', status: 'on', set: '1 次/8屏', setNum: 1, sug: '1/天（只读零风险；同日重复扫描无增量收益——通知已去重）', desc: '只读扫通知页喂关系池' },
-  { id: 'owen', t: '10:00', cat: '主动互动', name: 'Owen帖加持（外部任务）', unit: '帖', status: 'paused', set: '2 帖（旧拍板）', setNum: 2, sug: '≤2/天（外部任务维持旧档；X算法：直接导航不计推荐权重，仅关系维护价值）', desc: '外部 boost.js 任务：满45分钟新帖四连，10点轮暂停中' },
-  { id: 'graph', t: '10:00', cat: '主动互动', name: '图谱点赞（外部任务）', unit: '赞', status: 'paused', set: '2 赞/轮（旧拍板）', setNum: null, sug: '点赞类合计≤20/天（XActions 50-100/天档，我们取约1/3更保守）', desc: '@' + (G0.handle || '?') + ' + @antiAIvo 随机点赞（只赞不评），旧任务暂停中' },
+  { id: 'owen', t: '10:00', cat: '主动互动', name: 'Owen帖加持（外部任务）', unit: '帖', status: 'paused', set: '2 帖（旧拍板）', setNum: 2, sug: '≤2/天（外部任务维持旧档；X算法：直接导航不计推荐权重，仅关系维护价值）', desc: '外部 boost.js 任务：满45分钟新帖四连——**已退役**（10-17，接替者=权重维护互动行；ZCode 旧轮 10-18 已删除）' },
+  { id: 'graph', t: '10:00', cat: '主动互动', name: '图谱点赞（外部任务）', unit: '赞', status: 'paused', set: '2 赞/轮（旧拍板）', setNum: null, sug: '点赞类合计≤20/天（XActions 50-100/天档，我们取约1/3更保守）', desc: '@' + (G0.handle || '?') + ' + @antiAIvo 随机点赞（只赞不评）——已随 boost.js 退役（10-17），能力未迁移，复活需拍板' },
   ...windowRows('am', '10:20'),
   ...windowRows('mid', '15:20'),
   ...windowRows('pm', '20:20'),
@@ -187,9 +187,12 @@ function buildData() {
       { label: '关注量', val: following, ...fmtDelta(following, pE && pE.profile ? pE.profile.following : null) },
       { label: '关注/粉丝比', val: followers > 0 && following != null ? (following / followers).toFixed(2) : '—', txt: '健康线 ≤' + CFG.follow.ratioGuard.maxRatio, cls: 'flat', isRatio: true },
       { label: '原创帖(累计)', val: P.statuses ?? null, ...fmtDelta(P.statuses ?? null, pE && pE.profile ? pE.profile.statuses ?? null : null) },
-      (() => { const m = { label: '回复(近24h)', val: S.ownCount ?? null, ...fmtDelta(S.ownCount ?? null, pE && pE.statuses ? pE.statuses.ownCount ?? null : null) }; if (S.ownCount != null && Sdate && Sdate !== todayKey) m.txt = (m.txt && m.txt !== '—' ? m.txt + ' · ' : '') + '截至' + Sdate.slice(5); return m; })(),
-      // 互关粉丝占比（10-18 用户拍板新口径）：**旧分子÷新分母**=最近一次扫描的互关数 ÷ 今日最新粉丝总数
-      // 分子（互关数）是慢变量，每周一/周四凌晨全量扫描+漂移±10%触发补扫；分母每天 09:00 健康日检免费更新
+      (() => { const m = { label: '回复(近24h)', val: S.ownCount ?? null, ...fmtDelta(S.ownCount ?? null, pE && pE.statuses ? pE.statuses.ownCount ?? null : null) };
+        if (S.ownCount != null && Sdate && Sdate !== todayKey) m.txt = (m.txt && m.txt !== '—' ? m.txt + ' · ' : '') + '截至' + Sdate.slice(5);
+        if (Sdate && Sdate <= '2026-10-17') m.txt = '口径切换期（10-18 前=48h 基数），环比暂不可比' + (Sdate ? ' · 截至' + Sdate.slice(5) : ''); // 24h 口径 10-18 起，此前快照为 48h 基数，跨口径环比会虚低
+        return m; })(),
+      // 互关粉丝占比（10-18 用户拍板口径）：**旧分子÷新分母**=最近一次扫描的互关数 ÷ 今日最新粉丝总数
+      // 分子=每天凌晨 03:20 全量扫描一次，之后 24h 全部计算复用该数；分母=每天 09:00 健康日检免费更新
       (() => {
         const MUdates = [...dates].reverse().filter((d) => hist[d] && hist[d].mutual);
         const MUd = MUdates[0], MPd = MUdates[1];
