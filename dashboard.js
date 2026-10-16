@@ -57,6 +57,7 @@ const TASK_ROWS = [
   ...windowRows('mid', '15:20'),
   ...windowRows('pm', '20:20'),
   { id: 'maintain', t: '随帖', cat: '主动互动', name: '权重维护互动', unit: '次', status: 'on', set: '≤2 帖/目标 · 1 号/帖 · ≤3 次/号（v1.1 拍板）', setNum: null, sug: '维护动作计入当日点赞(≤20)/回复总帽（XActions 分档同前；从被维护账号角度=黄金窗内分散信号）', desc: '侦测器白天每25分钟盯 butcher/Owen 新帖：45min~3h 黄金窗挑帖点赞（butcher 对 Owen 另有≤1条/2天回复）；自然互动占比>1/3 跳过；幽灵/降权熔断' },
+  { id: 'verifyReply', t: '随窗(+40分)', cat: '系统运维', name: '回复可见性抽查', unit: '次', status: 'on', set: '每窗后 1 次 ×1-2 条（v1.1）', setNum: 1, sug: '事件触发 3 次/天（零暴露直测回复隐藏风险；与雷达交叉验证）', desc: '10:55/16:00/21:00 匿名核验刚发回复外部可见性；连续2天<50%自动触发雷达复测' },
   { id: 'passive', t: '随通知', cat: '被动回复', name: '回复他人的回复', unit: '', status: 'pending', set: '不限（你拍板）', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '别人在我们帖下的回复→回应；评论模块待接入' },
   { id: 'report', t: '22:05', cat: '系统运维', name: '每日日报', unit: '份', status: 'on', set: '1 份', setNum: 1, sug: '1/天（复盘频率；XActions 建议每日审计）', desc: '计划任务 Xops日报 自动生成' },
 ];
@@ -88,6 +89,7 @@ function aggregateLogs() {
       else if (j.task === 3 && j.action === 'followBack') { row = `followBack:${winByHour}`; item = `@${j.target}`; }
       else if (j.task === 3 && j.action === 'unfollow') { row = `unfollow:${winByHour}`; item = `@${j.target}`; }
       else if (j.task === 'mutualScan' && j.action === 'scan') { row = 'mutualScan'; item = `互关 ${j.mutual}/${j.scanned}（${(j.ratio * 100).toFixed(1)}%，覆盖 ${j.coverage}%）`; }
+      else if (j.task === 'verifyReply') { row = 'verifyReply'; item = `可见 ${j.visible}/${j.checked}（${j.window}窗后抽查）`; }
       else if (j.task === 'contacts' && j.action === 'scan') { row = 'scan'; item = `${j.events || '?'}事件/${j.screens || '?'}屏`; }
       else if (j.task === 'radar') { row = 'radar'; item = `双号四维度判定`; }
       else if (j.task === 'executor' && j.kind === 'maintain' && j.action === 'execute' && (j.status === 'done' || j.status === 'unknown')) {
@@ -194,10 +196,14 @@ function buildData() {
           const pp = +(rNow - rPrev).toFixed(1);
           d = pp === 0 ? { txt: `±0 · ${MU.mutual}/${MU.scanned}`, cls: 'flat' }
             : { txt: `${pp > 0 ? '▲ +' : '▼ '}${pp}pp · ${MU.mutual}/${MU.scanned}`, cls: pp > 0 ? 'up' : 'down' };
-        } else if (rNow != null) d = { txt: `${MU.mutual}/${MU.scanned}${MU.coverage != null && MU.coverage < 100 ? ' · 扫' + MU.coverage + '%' : ''}`, cls: 'flat' };
+        } else if (rNow != null) d = { txt: `${MU.mutual}/${MU.scanned}${MU.scanned < 20 ? ' · 样本过小' : (MU.coverage != null && MU.coverage < 100 ? ' · 扫' + MU.coverage + '%' : '')}`, cls: 'flat' };
         return { label: '互关粉丝占比', val: rNow != null ? rNow + '%' : null, isRatio: true, ...d };
       })(),
     ];
+    // 回复可见（v1.1 C2）：当日快照 replyVisibility 实算；无数据显示未启用
+    const rvSnap = readJson(path.join(STATE_DIR, 'health-snapshots', `${TODAY}.json`));
+    const rvList = (rvSnap && rvSnap.replyVisibility) || [];
+    const rvSum = rvList.reduce((acc, x) => ({ checked: acc.checked + (x.checked || 0), visible: acc.visible + (x.visible || 0) }), { checked: 0, visible: 0 });
     const dims = [
       P.state === 'suspended' ? { icon: '✕', cls: 'down', name: '账号状态', st: '封禁/冻结 · ' + todayKey }
         : P.state === 'ok' && (S.sensitiveCount || 0) === 0 ? { icon: '✓', cls: 'ok-t', name: '账号状态', st: `正常 · 无敏感标记 · ${todayKey || '—'}（每日）` }
@@ -205,7 +211,9 @@ function buildData() {
       (tE && tE.typeahead && tE.typeahead.state) === 'ok' ? { icon: tE.typeahead.found ? '✓' : '✗', cls: tE.typeahead.found ? 'ok-t' : 'wait-t', name: '搜索建议收录', st: (tE.typeahead.found ? '已收录' : '未收录（软信号）') + ` · ${todayKey || '—'}（每日）` }
         : { icon: '◐', cls: 'unk-t', name: '搜索建议收录', st: '未知 · ' + (todayKey || '—') },
       { icon: '⏳', cls: 'wait-t', name: '搜索可见', st: '未启用 · 待观察者窗口接入（P4）' },
-      { icon: '◐', cls: 'unk-t', name: '回复可见', st: '未启用 · conversation 抽查待接入（P3）' },
+      rvSum.checked > 0
+        ? { icon: rvSum.visible === rvSum.checked ? '✓' : '✕', cls: rvSum.visible / rvSum.checked >= 0.5 ? 'ok-t' : 'down', name: '回复可见', st: `抽查可见 ${rvSum.visible}/${rvSum.checked}（窗后匿名核验 · v1.1）` }
+        : { icon: '◐', cls: 'unk-t', name: '回复可见', st: '今日暂无抽查（窗后 +40 分钟自动核验）' },
     ];
     const series = HDAYS_ARR.map((d) => ({ d, v: hist[d] && hist[d].profile ? hist[d].profile.followers : null })).filter((x) => x.v != null);
     // 限流雷达（shadowbanradar 渲染通道）：当日快照里的 radar 字段为准

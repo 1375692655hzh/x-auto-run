@@ -90,9 +90,40 @@ function enqueueAndRun(acct, entries) {
   const q = readJson(file, []).concat(entries);
   writeJson(file, q);
   audit({ task: 'maintainWatch', action: 'enqueue', account: acct, count: entries.length, queue: path.basename(file) });
-  const child = spawn(process.execPath, [path.join(ROOT, 'executor.js'), '--account', acct, '--queue', file], { detached: true, stdio: 'ignore', cwd: ROOT });
+  // 保护区（统计规范 v1.1 C5/8）：三执行窗 ±30min + 09:25-09:55 关系池扫描段——区内只入队，延迟到保护区结束再拉起 executor（防账号锁/双开窗冲突）
+  const ZONES = [['09:25', '09:55'], ['10:10', '10:40'], ['15:10', '15:40'], ['20:10', '20:40']];
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const inZone = ZONES.find((z) => {
+    const [a, b] = [z[0].split(':').map(Number), z[1].split(':').map(Number)];
+    return nowMin >= a[0] * 60 + a[1] && nowMin < b[0] * 60 + b[1];
+  });
+  const spawnNow = () => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'executor.js'), '--account', acct, '--queue', file], { detached: true, stdio: 'ignore', cwd: ROOT });
+    child.unref();
+    LOG(`已入队 ${entries.length} 条 → executor 后台消费（${path.basename(file)}）`);
+  };
+  if (inZone) {
+    const [h, m] = inZone[1].split(':').map(Number);
+    const delay = ((h * 60 + m) - nowMin) * 60000 - (Date.now() % 60000); // 到保护区结束整分
+    LOG(`处于保护区 ${inZone[0]}-${inZone[1]}，${Math.round(delay / 60000)} 分钟后自动拉起 executor`);
+    setTimeout(spawnNow, Math.max(0, delay));
+  } else spawnNow();
+}
+
+// 雷达复测 flag（统计规范 v1.1）：熔断/可见率异常时写入 state/radar-reprobe.flag，侦测器消费（同号 2h 去抖）
+const RFLAG = path.join(STATE_DIR, 'radar-reprobe.flag');
+function consumeReprobeFlag() {
+  if (DRY) return;
+  const flag = readJson(RFLAG, null);
+  if (!flag || !flag.handle) return;
+  const last = (loadMSt().reprobeAt || {})[flag.handle] || 0;
+  if (Date.now() - last < 2 * 3600000) return; // 去抖：同号 2h 一次
+  const st = loadMSt(); st.reprobeAt = st.reprobeAt || {}; st.reprobeAt[flag.handle] = Date.now(); saveMSt(st);
+  try { fs.unlinkSync(RFLAG); } catch { }
+  audit({ task: 'maintainWatch', action: 'radarReprobe', handle: flag.handle, note: flag.note || '' });
+  const child = spawn(process.execPath, [path.join(ROOT, 'radar.js'), '--check', '--handles=' + flag.handle], { detached: true, stdio: 'ignore', cwd: ROOT });
   child.unref();
-  LOG(`已入队 ${entries.length} 条 → executor 后台消费（${path.basename(file)}）`);
+  LOG(`雷达复测 flag 消费：@${flag.handle}（${flag.note || '熔断'}）`);
 }
 
 (async () => {
@@ -100,6 +131,7 @@ function enqueueAndRun(acct, entries) {
   if (!M.enabled) { console.error('maintain.enabled=false，退出'); process.exit(0); }
   const hour = new Date().getHours();
   if (!DRY && (hour < (L.activeHours || [9, 22])[0] || hour >= (L.activeHours || [9, 22])[1])) { LOG('不在 9-22 活动窗，本轮退出'); process.exit(0); }
+  consumeReprobeFlag();
 
   const st = loadMSt();
   st.lastRun = nowIso();
@@ -129,11 +161,18 @@ function enqueueAndRun(acct, entries) {
       if (already) continue;
       const natural = (p.likes || 0) + (p.replies || 0);
       if (1 / Math.max(natural, 1) > (M.dominanceRatio || 0.34)) { notes.push(`帖${p.statusId.slice(-6)} 自然互动${natural}，维护会超1/3，跳过`); continue; }
-      // 选维护号：目标在名单内 + 单号日帽 + ghost/deboost 熔断
+      // 选维护号：目标在名单内 + 单号日帽 + ghost/deboost 熔断（被熔断的号写复测 flag）
+      const radarBlocked = [];
       const eligible = Object.entries(M.maintainers || {})
         .filter(([k, cfgm]) => (cfgm.targets || []).includes(tKey) && acctByKey[k])
         .map(([k]) => k)
-        .filter((k) => maintainerCountToday(k) < (M.perMaintainerDailyCap || 3) && radarOk(acctByKey[k].handle).ok);
+        .filter((k) => {
+          if (maintainerCountToday(k) >= (M.perMaintainerDailyCap || 3)) return false;
+          const ro = radarOk(acctByKey[k].handle);
+          if (!ro.ok) radarBlocked.push({ handle: acctByKey[k].handle, why: ro.why });
+          return ro.ok;
+        });
+      if (radarBlocked.length && !DRY) writeJson(RFLAG, { handle: radarBlocked[0].handle, at: nowIso(), note: '维护熔断: ' + radarBlocked[0].why });
       if (!eligible.length) { notes.push(`帖${p.statusId.slice(-6)} 无可用维护号（日帽或熔断）`); continue; }
       const by = eligible[Math.floor(Math.random() * eligible.length)];
       const mCfg = M.maintainers[by];

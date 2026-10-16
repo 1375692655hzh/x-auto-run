@@ -62,6 +62,16 @@ try {
       return `${icon} @${e.handle} ${e.verdict}（粉丝 ${e.profile.followers ?? '?'}，48h 自发 ${e.statuses.ownCount ?? '?'}，敏感 ${e.statuses.sensitiveCount ?? 0}）`;
     });
     if (parts.length) health = parts.join('\n');
+    // v1.1 C7b：雷达四维 + 互关占比两行（数据已在快照里）
+    if (snap.radar && snap.radar.results) {
+      const rl = Object.entries(snap.radar.results).map(([h, r]) => {
+        const f = r.four || {};
+        return `- 雷达 @${h}：${f.score || '?'}/100 ${f.verdict || ''}（幽灵${f.ghost || '?'}｜降权${f.deboost || '?'}）`;
+      });
+      if (rl.length) health += '\n' + rl.join('\n');
+    }
+    const ml = Object.entries(snap.accounts || {}).filter(([, e]) => e.mutual).map(([k, e]) => `- 互关占比 ${k}：${(e.mutual.ratio * 100).toFixed(1)}%（${e.mutual.mutual}/${e.mutual.scanned}${e.mutual.scanned < 20 ? ' 样本过小' : ''}）`);
+    if (ml.length) health += '\n' + ml.join('\n');
   }
 } catch { }
 

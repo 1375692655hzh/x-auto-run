@@ -16,8 +16,17 @@ const RC = Object.assign({ profileId: '9271f8e085944b0a8a6685aa19e8b2f7', handle
 const argv = process.argv.slice(2);
 const DUMP = argv.includes('--dump');
 const CHECK = argv.includes('--check');
+const HANDLES_ARG = ((argv.find((a) => a.startsWith('--handles=')) || '').slice('--handles='.length) || '').split(',').map((s) => s.trim()).filter(Boolean);
+if (HANDLES_ARG.length) RC.handles = HANDLES_ARG; // 单号复测用（统计规范 v1.1：熔断触发/19:40 晚检）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// 日额度护栏（v1.1 C8）：当日已跑检查数 ≥10 拒跑（免费档 ~30/天，固定 5 + 复测 ≤10，红线 30）
+function radarChecksToday() {
+  try {
+    return fs.readFileSync(path.join(ROOT, 'state', `log-${today().slice(0, 7)}.jsonl`), 'utf8').trim().split('\n')
+      .filter((l) => { try { const j = JSON.parse(l); return j.task === 'radar' && j.at && j.at.slice(0, 10) === today(); } catch { return false; } }).length;
+  } catch { return 0; }
+}
 
 async function openWindow(profileId) {
   const j = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: profileId }) }).then((r) => r.json());
@@ -90,6 +99,8 @@ function parseFour(text, aria) {
 
 (async () => {
   if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { console.error('PAUSE 生效中，退出'); process.exit(0); }
+  const usedToday = radarChecksToday();
+  if (CHECK && usedToday >= 10) { console.error(`雷达日额度护栏：今日已 ${usedToday} 次检查（上限 10），拒跑`); process.exit(1); }
   const results = {};
   for (const h of RC.handles) {
     const r = await renderResult(h);

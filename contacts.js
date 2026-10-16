@@ -304,7 +304,14 @@ async function scanOwnNotifications(led) {
 
 // ── 源4（可选）：FxTwitter 存活检查（纯 HTTP 匿名） ────────
 async function liveness(led) {
-  const targets = Object.values(led.people).filter((e) => !e.eligibility.gone);
+  let targets = Object.values(led.people).filter((e) => !e.eligibility.gone);
+  // --half=1|2：按互惠分拆半池（周一上半区/周四下半区），防一次全池打爆 FxTwitter 日预算（统计规范 v1.1 C3）
+  const HALF = ((process.argv.find((a) => a.startsWith('--half=')) || '').slice('--half='.length) || '').trim();
+  if (HALF === '1' || HALF === '2') {
+    targets = targets.sort((a, b) => (b.score || 0) - (a.score || 0));
+    const mid = Math.ceil(targets.length / 2);
+    targets = HALF === '1' ? targets.slice(0, mid) : targets.slice(mid);
+  }
   let checked = 0, gone = 0, unknown = 0;
   for (const e of targets) {
     let ok = null;

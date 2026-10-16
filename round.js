@@ -30,6 +30,19 @@ const run = (args) => {
 
 (async () => {
   if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { console.error('state/PAUSE 急停生效中，本轮跳过'); process.exit(0); }
+  // 三窗健康门（统计规范 v1.1 待办①，保守档）：当日健康快照 suspended/敏感标记 → 停窗；unknown/缺快照 → 照常（检测失败≠异常铁律）
+  try {
+    const snap = JSON.parse(fs.readFileSync(path.join(STATE_DIR, 'health-snapshots', `${today()}.json`), 'utf8'));
+    const e = snap.accounts && snap.accounts[ACCOUNT];
+    const suspended = e && ((e.verdict === 'suspended') || (e.profile && e.profile.state === 'suspended'));
+    const sensitive = e && e.statuses && (e.statuses.sensitiveCount || 0) > 0;
+    if (suspended || sensitive) {
+      console.error(`健康门：停窗（${suspended ? '账号 suspended' : '敏感标记>0'}）`);
+      log({ action: 'healthGate', window: WINDOW, note: '停窗: ' + (suspended ? 'suspended' : '敏感标记') });
+      process.exit(0);
+    }
+    console.log('健康门：通过');
+  } catch { console.log('健康门：当日无快照，照常执行（unknown≠异常）'); }
   const rs = loadRounds();
   const dry = rs.completed < (CFG.rounds.dryRounds || 0);
   console.log(`执行窗 ${WINDOW} 开始（第 ${rs.completed + 1} 轮，${dry ? '演练模式：扫描/生成/队列全真，点击关闭' : '真实执行模式'}）`);

@@ -90,6 +90,7 @@ function digestTypeahead(res, handle) {
 (async () => {
   fs.mkdirSync(SNAP_DIR, { recursive: true });
   const arg = (process.argv.find((a) => a.startsWith('--accounts=')) || '').slice('--accounts='.length);
+  const LIGHT = process.argv.includes('--light'); // 晚间轻检档（v1.1 C6）：仅 profile 端点×watch 号，喂 22:30 日报收盘数
   const keys = arg ? arg.split(',').map((s) => s.trim()).filter(Boolean) : CFG.accounts.filter((a) => a.watch !== false).map((a) => a.key); // 默认只扫 watch 账号；接入未授权（watch:false）不占每日检测
   const file = path.join(SNAP_DIR, today() + '.json');
   let snap = { date: today(), checkedAt: null, accounts: {} };
@@ -110,10 +111,21 @@ function digestTypeahead(res, handle) {
 
     const p = digestProfile(await getJSON(`${API}/2/profile/${h}`));
     await sleep(1500);
-    const since = Math.floor(Date.now() / 1000 - 48 * 3600);
-    const s = digestStatuses(await getJSON(`${API}/2/profile/${h}/statuses?with_replies=1&since=${since}`), h);
-    await sleep(1500);
-    const t = digestTypeahead(await getJSON(`${API}/2/typeahead?q=${encodeURIComponent(h)}&result_type=users`), h);
+    let s = { state: 'skipped' }, t = { state: 'skipped' };
+    if (!LIGHT) {
+      const since = Math.floor(Date.now() / 1000 - 48 * 3600);
+      s = digestStatuses(await getJSON(`${API}/2/profile/${h}/statuses?with_replies=1&since=${since}`), h);
+      await sleep(1500);
+      t = digestTypeahead(await getJSON(`${API}/2/typeahead?q=${encodeURIComponent(h)}&result_type=users`), h);
+    }
+
+    if (LIGHT) {
+      // 轻检档：只刷新 profile 数字，其余字段（statuses/typeahead/mutual/昨日判定）原样保留
+      const prevAcct = (snap.accounts[key] || {});
+      snap.accounts[key] = { ...prevAcct, handle: h, profile: p, lightAt: new Date().toISOString() };
+      report[key] = { light: true, followers: p.followers, following: p.following, statuses: p.statuses, state: p.state };
+      continue;
+    }
 
     const entry = { handle: h, profile: p, statuses: s, typeahead: t };
     // 总判定：全部通道 ok 才 green；suspended 视为硬事实；其余一律 unknown（本版不下"异常"结论）
