@@ -355,6 +355,11 @@
   },
   "posts": {
     "perWindow": 2,
-    "perDay": 10
+    "perDay": 10,
+    "budget": {
+      "perDay": 2,
+      "windowAllocation": { "am": 1, "mid": 0, "pm": 1 },
+      "note": "Gentle 起步档（XActions 2/天；X算法：隔窗发布每帖独占2h黄金窗防稀释）。2026-10-18 用户拍板'按推荐执行'。升级到 Normal(5/天) 需量化条件触发呈报+人工拍板：14天零限流+雷达绿+账龄≥30天+丢弃量佐证"
+    }
   }
 }

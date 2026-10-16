@@ -335,7 +335,10 @@ async function postTweet(page, text) {
   if (!(await typeReply(page, text))) return { ok: false, note: '输入失败' };
   await sleep(800);
   const r = await submitReply(page); // compose 是弹窗形态，成功气泡判定与回复一致
-  return { ok: r === true, unknown: r === 'unknown', raw: r };
+  if (r !== true) return { ok: r === true, unknown: r === 'unknown', raw: r };
+  // C3 语义分叉（三方方案）：读 toast 区分"新发"vs"已存在"（发过了/already=重复，非新发成功）
+  const toast = await page.evaluate(() => ((document.querySelector('[data-testid="toast"]') || {}).textContent || '').trim()).catch(() => '');
+  return /发过|already/i.test(toast || '') ? { ok: true, note: '已存在（重复，非本次新发）' } : { ok: true, note: '新发' };
 }
 
 function executeAction(page, entry) {
@@ -404,6 +407,12 @@ function executeAction(page, entry) {
         e.text = qc.cleaned;
       }
       if (capLeftRolling(e.type) <= 0) { e.status = 'skipped'; e.result = `滚动24h额度不足(${e.type})`; stats.skipped.push(e.id); continue; }
+      // 原创帖间隔闸（三方方案 P4，X 算法：每帖 2h 黄金窗）：距上一条原创帖尝试 <2h 跳过
+      if (e.type === 'post') {
+        const lastPost = Math.max(0, ...((LEDGER.actions.post || []).filter(Number.isFinite)));
+        if (lastPost && Date.now() - lastPost < 2 * 3600000) { e.status = 'skipped'; e.result = `距上一条原创帖不足 2h（${Math.round((Date.now() - lastPost) / 60000)}min）`; stats.skipped.push(e.id); continue; }
+        if (e.jitterSec) await sleep(e.jitterSec * 1000); // 窗内随机偏移防整点指纹
+      }
 
       // exactly-once：发送前落盘 intent
       e.status = 'intent';

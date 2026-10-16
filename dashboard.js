@@ -32,8 +32,8 @@ const Q = ((CFG.rounds || {}).quotas) || {};
 function windowRows(w, t) {
   const f = (m) => ((m || {})[w] != null ? m[w] : null);
   return [
-    { id: `post:${w}`, t, cat: '原创发布', name: `原创发布·${WL[w]}窗`, unit: '帖', status: 'wait-feed', set: '未设定', setNum: null, sug: '1-2/天起步→≤5/天（XActions Gentle2~Normal5 档；官方50/天硬顶；X算法：每帖2h黄金窗，多发互相稀释）',
-      desc: '内容源投 posts-inbox/ → 自动拾取发布。你尚未拍板当次量——拍板前显示未设定' },
+    { id: `post:${w}`, t, cat: '原创发布', name: `原创发布·${WL[w]}窗`, unit: '帖', status: 'wait-feed', set: `${((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[w] ?? 0} 帖（拍板：Gentle ${((CFG.posts || {}).budget || {}).perDay || 2} 条/天，早1午0晚1）`, setNum: ((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[w] ?? null, sug: '1-2/天起步→≤5/天（XActions Gentle2~Normal5 档；官方50/天硬顶；X算法：每帖2h黄金窗，多发互相稀释）',
+      desc: '绑定内容源（x-daily-serve）→ 拉取增量 hash 去重 → 缓冲 48h → 按窗预算滴灌 posts-inbox → 自动发布' },
     { id: `visit:${w}`, t, cat: '主动互动', name: `关系池串门·${WL[w]}窗`, unit: '条', status: 'on', set: `${f(Q.visit)} 条（你拍板）`, setNum: f(Q.visit), sug: '回复类合计≤5-10/天=低风险档（XActions 回复分档；官方200/天硬顶）',
       desc: '互惠分选人→对方最新帖留言（LLM+质量门，限频7/21天，近14天真关系口径）' },
     { id: `community:${w}`, t, cat: '社区互关', name: `互关评论·${WL[w]}窗`, unit: '条', status: 'on', set: `${f(Q.community)} 条（你拍板）`, setNum: f(Q.community), sug: '≤10/天=低风险；20-50/天=高风险档（XActions 分档；当前设定20/天落在高风险区，已如实告知）',

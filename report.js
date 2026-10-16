@@ -36,6 +36,7 @@ try {
     else if (j.task === 3) real.push(`${hm(j.at)} [${acct}] ${j.action === 'followBack' ? '回关' : j.action === 'unfollow' ? '超时取关' : '主动关注'}：@${j.target}${j.verified === false ? '（未确认）' : ''}`);
     else if (j.task === 'graph') real.push(`${hm(j.at)} [${acct}] ${TASK_CN.graph}：@${j.target} 的帖 ${String(j.post).slice(-6)}`);
     else if (j.task === 'contacts') sys.push(`${hm(j.at)} [${acct}] ${TASK_CN.contacts}：${j.action}${j.events ? ' ' + j.events + ' 条事件' : j.pool ? ' 池=' + j.pool : ''}`);
+    else if (j.task === 'executor' && j.type === 'post' && j.status === 'done') real.push(`${hm(j.at)} [${acct}] 原创发布：${j.note || ''}「${String(j.text || '').slice(0, 30)}…」`);
     else if (j.task === 'executor') sys.push(`${hm(j.at)} [${acct}] ${TASK_CN.executor}：${j.action}${j.id ? ' ' + j.id : ''} ${j.status || ''}${j.note ? ' ' + j.note : ''}`);
     else sys.push(`${hm(j.at)} [${acct}] ${TASK_CN[j.task] || j.task} ${j.action || ''} ${j.target || j.post || ''}`);
   }
@@ -98,6 +99,23 @@ try {
   }
 } catch { }
 
+// ── 内容发布（三方方案 v1，2026-10-18）────────────────────
+let contentPub = '- 无（未拉取或未启用）';
+try {
+  const pulls = [];
+  for (const l of fs.readFileSync(logFile, 'utf8').trim().split('\n')) {
+    let j; try { j = JSON.parse(l); } catch { continue; }
+    if (j.task === 'contentPull' && j.action === 'pull' && j.at && j.at.startsWith(DATE) && !j.dry) pulls.push(j);
+  }
+  if (pulls.length) {
+    const sum = pulls.reduce((a, x) => ({ fetched: a.fetched + (x.fetched || 0), fresh: a.fresh + (x.fresh || 0), dropped: a.dropped + (x.dropped || 0), wrote: a.wrote + (x.wrote || 0) }), { fetched: 0, fresh: 0, dropped: 0, wrote: 0 });
+    const buf = readJson(path.join(STATE_DIR, 'content-buffer-butcher.json'));
+    const budget = (readJson(path.join(ROOT, 'config.json')).posts || {}).budget || {};
+    const postsDone = real.filter((x) => x.includes('原创发布')).length;
+    contentPub = `- 档位：Gentle ${budget.perDay || 2} 条/天（早${(budget.windowAllocation || {}).am ?? 1}/午${(budget.windowAllocation || {}).mid ?? 0}/晚${(budget.windowAllocation || {}).pm ?? 1}，拍板口径）\n- 供给链：拉取 ${sum.fetched} 条 → 新增 ${sum.fresh} → 过期丢弃 ${sum.dropped} → 投递 ${sum.wrote} → 实际发布 ${postsDone} 条（供给利用率≈${sum.fetched ? Math.round(postsDone / sum.fetched * 100) : 0}%，Gentle 低档预期）\n- 缓冲：${buf && buf.buffer ? buf.buffer.length : 0} 条待命`;
+  }
+} catch { }
+
 const md = `# 运营日报 ${DATE}
 
 ## 一、今日在 X 平台真实发生的动作（${real.length} 条）
@@ -114,7 +132,9 @@ ${health}
 
 ## 五、关系池
 ${pools || '- 未建池'}
-## 六、队列
+## 六、内容发布
+${contentPub}
+## 七、队列
 ${queues || '- 无队列文件'}
 
 > 生成于 ${new Date().toISOString()}（node report.js）；实时全貌：node status.js；总控看板：运营看板.md

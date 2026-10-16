@@ -339,11 +339,13 @@ async function planUnfollow(ts) {
 const POSTS_INBOX = path.join(ROOT, 'posts-inbox');
 async function planPost(ts) {
   const PC = Object.assign({ perWindow: 2, perDay: 10 }, CFG.posts || {});
+  // 窗预算硬门（三方方案 2026-10-18）：拍板的 windowAllocation 优先于引擎帽（午窗=0 绝不发），防手工投递绕过
+  const alloc = ((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[WINDOW];
   const inWindow = loadQueue(WINDOW).filter((e) => e.kind === 'post' && e.status !== 'skipped').length;
-  const cap = Math.min(PC.perWindow - inWindow, PC.perDay - countedToday('post'));
-  if (cap <= 0) { console.log('发布额度已满或本窗已排'); return []; }
+  const cap = Math.min(alloc != null ? alloc : PC.perWindow, PC.perWindow, PC.perDay - countedToday('post'));
+  if (cap - inWindow <= 0) { console.log('发布预算已满或本窗分配为 0（拍板档位）'); return []; }
   let files = [];
-  try { files = fs.readdirSync(POSTS_INBOX).filter((f) => f.endsWith('.json') || f.endsWith('.txt')); } catch { return []; }
+  try { files = fs.readdirSync(POSTS_INBOX).filter((f) => (f.endsWith('.json') && !f.includes('.done-')) || f.endsWith('.txt')); } catch { return []; } // C1 修复：归档文件绝不再被扫描（曾以 .json 结尾会被重扫致重发）
   const texts = [];
   const usedFiles = [];
   for (const f of files) {
@@ -364,15 +366,16 @@ async function planPost(ts) {
   const baseId = loadQueue(WINDOW).length;
   const out = [];
   for (const t of texts) {
-    if (out.length >= cap) break;
+    if (out.length >= cap - inWindow) break;
     if (!t || seen.has(t)) { console.log('  跳过（空/重复）:', String(t).slice(0, 24)); continue; }
     const wl = quality.weightedLen(t);
     if (wl > 280) { console.log(`  跳过（超长 ${wl}>280）:`, t.slice(0, 24)); continue; }
-    out.push({ id: `${today()}-${WINDOW}-post-${baseId + out.length + 1}`, account: ACCOUNT, type: 'post', kind: 'post', text: t, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
+    seen.add(t); // C2 修复：选中即入去重集（同批相同文本不再二次入队）
+    out.push({ id: `${today()}-${WINDOW}-post-${baseId + out.length + 1}`, account: ACCOUNT, type: 'post', kind: 'post', text: t, window: WINDOW, jitterSec: 60 + Math.floor(Math.random() * 120), status: 'planned', createdAt: new Date().toISOString() }); // jitterSec：发帖窗内 60-180s 随机偏移防整点指纹（三方方案 P4）
     console.log(`  发布入队（${wl}字重）: ${t.slice(0, 32)}…`);
   }
-  // 消费投递文件（改名留审计；未入队的超额内容保留在 .done 里不丢）
-  for (const f of usedFiles) { try { fs.renameSync(path.join(POSTS_INBOX, f), path.join(POSTS_INBOX, f + '.done-' + Date.now() + '.json')); } catch { } }
+  // 消费投递文件（改名留审计；后缀去掉 .json 防重扫=C1 双保险；未入队的超额内容保留在 .done 里不丢）
+  for (const f of usedFiles) { try { fs.renameSync(path.join(POSTS_INBOX, f), path.join(POSTS_INBOX, f + '.done-' + Date.now())); } catch { } }
   return out;
 }
 
