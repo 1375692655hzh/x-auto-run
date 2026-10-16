@@ -47,7 +47,7 @@ function windowRows(w, t) {
   ];
 }
 const TASK_ROWS = [
-  { id: 'mutualScan', t: '03:20', cat: '系统运维', name: '互关粉丝占比扫描', unit: '次', status: 'on', set: '1 次/号·每周一/周四（10-18 拍板降频：旧分子÷新分母口径）', setNum: null, sug: '2 次/周+漂移±10%自动补扫（互关数是慢变量，占比格每天用最新粉丝数重算，无需日扫）', desc: 'followers-scan 全量扫描仅周一/周四凌晨；每天 09:00 健康日检发现粉丝漂移±10%自动补扫该号' },
+  { id: 'mutualScan', t: '03:20', cat: '系统运维', name: '互关粉丝占比扫描', unit: '次', status: 'on', set: '1 次/号·每天凌晨（10-18 你定：24h 扫一次，之后 24h 占比计算全部复用该互关数）', setNum: 1, sug: '1/天·凌晨低峰（扫描全量翻粉丝列表；全天占比=扫得互关数÷当日最新粉丝数，计算复用不再扫）', desc: 'followers-scan 每日凌晨全量数互关一次；监控页全天用该分子÷最新粉丝数出占比' },
   { id: 'health', t: '09:00', cat: '系统运维', name: '健康日检', unit: '次', status: 'on', set: '1 次', setNum: 1, sug: '1/天（radar 方法论：四项检测每日至少一检）', desc: 'FxTwitter 匿名三通道，喂六宫格/两图' },
   { id: 'radar', t: '09:10', cat: '系统运维', name: '限流雷达', unit: '次', status: 'on', set: '1 次（双号）', setNum: 1, sug: '1/天（shadowbanradar 免费档 30 次/天内充裕；过多检测无增益）', desc: 'shadowbanradar 渲染通道，四维度判定+分数' },
   { id: 'scan', t: '09:35', cat: '系统运维', name: '关系池扫描', unit: '次', status: 'on', set: '1 次/8屏', setNum: 1, sug: '1/天（只读零风险；同日重复扫描无增量收益——通知已去重）', desc: '只读扫通知页喂关系池' },

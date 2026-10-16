@@ -147,24 +147,5 @@ function digestTypeahead(res, handle) {
   snap.checkedAt = new Date().toISOString();
   fs.writeFileSync(file, JSON.stringify(snap, null, 2));
   console.log(`健康快照已写入 state/health-snapshots/${today()}.json`);
-  // 互关占比漂移触发（10-18 拍板：扫描每周一/四 + 粉丝总量较上次扫描漂移±10%时补扫该号）
-  if (!LIGHT) {
-    try {
-      const mst = JSON.parse(fs.readFileSync(path.join(STATE_DIR, 'mutual-scan-state.json'), 'utf8'));
-      const { spawn } = require('child_process');
-      for (const [key, ls] of Object.entries(mst.lastScan || {})) {
-        const e = snap.accounts[key];
-        const f = e && e.profile && e.profile.followers;
-        if (ls.date === today() || !f || !ls.followers) continue;
-        if (Math.abs(f - ls.followers) / ls.followers > 0.10) {
-          const acct = CFG.accounts.find((a) => a.key === key);
-          if (!acct) continue;
-          console.log(`[漂移触发] @${acct.handle} 粉丝 ${ls.followers}→${f}（±10%+），补扫互关`);
-          fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: new Date().toISOString(), task: 'mutualScan', account: key, action: 'driftTrigger', note: `${ls.followers}→${f}` }) + '\n');
-          spawn(process.execPath, [path.join(ROOT, 'followers-scan.js'), '--account=' + key], { detached: true, stdio: 'ignore', cwd: ROOT }).unref();
-        }
-      }
-    } catch { /* 无 lastScan 状态则跳过 */ }
-  }
   console.log(JSON.stringify(report, null, 2));
 })().catch((e) => { console.error(e); process.exit(1); });
