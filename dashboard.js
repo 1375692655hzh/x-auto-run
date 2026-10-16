@@ -189,7 +189,7 @@ function buildData() {
       { label: '原创帖(累计)', val: P.statuses ?? null, ...fmtDelta(P.statuses ?? null, pE && pE.profile ? pE.profile.statuses ?? null : null) },
       (() => { const m = { label: '回复(近24h)', val: S.ownCount ?? null, ...fmtDelta(S.ownCount ?? null, pE && pE.statuses ? pE.statuses.ownCount ?? null : null) };
         if (S.ownCount != null && Sdate && Sdate !== todayKey) m.txt = (m.txt && m.txt !== '—' ? m.txt + ' · ' : '') + '截至' + Sdate.slice(5);
-        if (Sdate && Sdate <= '2026-10-17') m.txt = '口径切换期（10-18 前=48h 基数），环比暂不可比' + (Sdate ? ' · 截至' + Sdate.slice(5) : ''); // 24h 口径 10-18 起，此前快照为 48h 基数，跨口径环比会虚低
+        if (Sdate && prevKey && (Sdate >= '2026-10-18') !== (prevKey >= '2026-10-18')) m.txt = '口径切换期（10-18 起=24h 基数），环比暂不可比' + (Sdate ? ' · 截至' + Sdate.slice(5) : ''); // K3 评审版条件：仅当 delta 两侧口径不同（一侧≥10-18=24h、另一侧<10-18=48h）才警示，无假阳性且覆盖快照缺失边界
         return m; })(),
       // 互关粉丝占比（10-18 用户拍板口径）：**旧分子÷新分母**=最近一次扫描的互关数 ÷ 今日最新粉丝总数
       // 分子=每天凌晨 03:20 全量扫描一次，之后 24h 全部计算复用该数；分母=每天 09:00 健康日检免费更新
@@ -296,7 +296,7 @@ function buildData() {
       { label: '回关新粉', unit: '人', done: sumWin('followBack'), planned: FB.perDay, plannedText: String(FB.perDay), note: '10/窗 ×3 封顶（你的 10/小时 落地）' },
       { label: '关系串门', unit: '条', done: sumWin('visit'), planned: planWin(Q.visit), plannedText: String(planWin(Q.visit)), note: '三窗合计 4+3+3（你拍板）' },
       { label: '原创发布', unit: '帖', done: sumWin('post'), planned: null, plannedText: '未设定', note: '你尚未拍板发布量；引擎帽 ≤10/天·2/窗' },
-      { label: '点赞', unit: '赞', done: (g1.graph || {}).count || 0, planned: ((CFG.dailyCaps || {}).likes != null ? CFG.dailyCaps.likes : null), plannedText: '≤' + ((CFG.dailyCaps || {}).likes ?? 20) + ' 引擎帽', note: '图谱点赞暂停中；引擎滚动帽 20/天' },
+      { label: '点赞', unit: '赞', done: (g1.graph || {}).count || 0, planned: ((CFG.dailyCaps || {}).likes != null ? CFG.dailyCaps.likes : null), plannedText: '≤' + ((CFG.dailyCaps || {}).likes ?? 20) + ' 引擎帽', note: '图谱点赞已退役（10-17）；引擎滚动帽 20/天' },
       { label: '取关', unit: '人', done: sumWin('unfollow'), planned: 0, plannedText: '0（不做）', note: '你拍板不做（unfollowPolicy off + 滚动帽 0 双保险）' },
     ];
     return {
