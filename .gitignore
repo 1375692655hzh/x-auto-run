@@ -1,0 +1,14 @@
+# 密钥（绝不入库）
+llm.json
+
+# 运行时状态与生成物
+state/
+queue/
+posts-inbox/
+*.log
+
+# 依赖
+node_modules/
+
+# 调试截图
+debug-*.png

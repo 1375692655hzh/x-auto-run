@@ -1,0 +1,344 @@
+{
+  "bitbrowser": "http://127.0.0.1:54345",
+  "target": {
+    "handle": "Owenwin888",
+    "lookbackDays": 10,
+    "maxPostsPerRun": 2
+  },
+  "accounts": [
+    {
+      "key": "butcher",
+      "profileId": "8eb4ae1e9a6e407e8ebe87f333889811",
+      "handle": "MarketButcher88",
+      "ui": "zh-CN",
+      "role": "run",
+      "watch": true,
+      "note": "运行号：唯一授权真实互动（2026-10-16 用户授权范围仅此一号）"
+    },
+    {
+      "key": "fullwin",
+      "profileId": "60a37618910b4cceaa633a1b9e1089cf",
+      "handle": "Fullwin777",
+      "ui": "ja",
+      "role": "linked",
+      "watch": true,
+      "note": "已接入·未授权：只做每日只读健康快照（历史延续），不执行任何互动任务"
+    },
+    {
+      "key": "owen",
+      "profileId": "2d4d7ab00f01455a95a0497af72ce1e3",
+      "handle": "Owenwin888",
+      "ui": "zh-TW",
+      "role": "linked",
+      "watch": true,
+      "note": "已接入·未授权：不执行任务；接入只读统计（健康日检+限流雷达，10-16 拍板）；另为外部 boost.js 加持对象（config.target）"
+    },
+    {
+      "key": "wcixot",
+      "profileId": "9271f8e085944b0a8a6685aa19e8b2f7",
+      "handle": "WCixot",
+      "ui": "zh-CN",
+      "role": "observer",
+      "watch": true,
+      "note": "观察者窗口：只读检测（限流雷达渲染通道+自身健康日检），永不互动；另有独立取关自动化不归本工具管"
+    }
+  ],
+  "radar": {
+    "handles": ["MarketButcher88", "Owenwin888", "Fullwin777", "WCixot"]
+  },
+  "limits": {
+    "activeHours": [
+      9,
+      22
+    ],
+    "minPostAgeMinutes": 45,
+    "sessionMaxMinutes": 20,
+    "consecutiveFailAbort": 3,
+    "communityAuthorCooldownDays": 14,
+    "templateCooldownDays": 7,
+    "templateCooldownPolicy": "soft",
+    "dailyCaps": {
+      "owenPosts": 2,
+      "owenReplies": 4,
+      "communityReplies": 20,
+      "likes": 20,
+      "bookmarks": 8,
+      "copylinks": 8,
+      "follows": 50,
+      "unfollows": 0
+    }
+  },
+  "follow": {
+    "afterCommunityReply": true,
+    "delayAfterReplyGaussMs": [
+      90000,
+      45000
+    ],
+    "browseMs": [
+      20000,
+      45000
+    ],
+    "followGapGaussMs": [
+      15000,
+      5000
+    ],
+    "filters": {
+      "minFollowers": 30,
+      "maxFollowing": 2000,
+      "maxTargetRatio": 5
+    },
+    "ratioGuard": {
+      "maxRatio": 1.8,
+      "smallAccountMaxRatio": 5,
+      "smallAccountBelowFollowers": 50,
+      "smallAccountProactivePerDay": 2
+    },
+    "followBack": {
+      "enabled": true,
+      "perWindow": 10,
+      "perDay": 30,
+      "scanCells": 40
+    },
+    "unfollowTimeout": {
+      "enabled": false,
+      "days": 7,
+      "perDay": 0
+    },
+    "unfollowPolicy": {
+      "mode": "off",
+      "perRun": 0,
+      "graceDays": 14,
+      "scanCells": 60,
+      "whitelist": []
+    }
+  },
+  "graphAccounts": [
+    {
+      "handle": "TrumpDailyPosts",
+      "maxLikesPerRun": 2,
+      "browseMs": [
+        20000,
+        45000
+      ],
+      "recentDays": 3
+    },
+    {
+      "handle": "antiAIvo",
+      "maxLikesPerRun": 2,
+      "browseMs": [
+        20000,
+        45000
+      ],
+      "recentDays": 3
+    }
+  ],
+  "insights": {
+    "profileId": "2d4d7ab00f01455a95a0497af72ce1e3",
+    "handle": "Owenwin888",
+    "maxScreens": 10,
+    "recentDays": 7,
+    "topN": 20,
+    "maxSessionMinutes": 15
+  },
+  "task1": {
+    "actionsOrder": [
+      "like",
+      "bookmark",
+      "copylink",
+      "reply"
+    ]
+  },
+  "executor": {
+    "rollingCaps": {
+      "reply": 30,
+      "follow": 50,
+      "like": 20,
+      "unfollow": 0,
+      "post": 10
+    },
+    "queueTtlMinutes": 300,
+    "actionGapGaussMs": [
+      90000,
+      30000
+    ],
+    "followFirstGapGaussMs": [
+      90000,
+      30000
+    ],
+    "sessionMaxMinutes": 25,
+    "lockStaleMinutes": 30
+  },
+  "personas": {
+    "butcher": "你是 X 账号 @MarketButcher88 的运营者本人。人设：二十年美股交易员，常驻弗吉尼亚，主业盯美股，兼看加密货币和 AI 行业动态；性格直接犀利、不绕弯，重数据和一手信息、轻故事和情绪，带老手式的冷幽默；中文表达口语自然，像交易圈老炮聊天；不喊单、不吹捧、不用感叹号轰炸、不装年轻人。"
+  },
+  "prompts": {
+    "visit": "关系维护留言：对方之前跟我们互动过。真诚回应他这条帖子的具体内容——认可其中某个具体观点或数据，或补充一点你自己的交易视角；语气像老朋友串门，可以自然说一句常来往；不要引导互关（已经是朋友关系），不要任何敷衍套话。",
+    "community": "互关社区回复：楼主在互关话题下发帖求互相关注。第一句真诚呼应他帖子里的具体内容或观点（有观点就接观点，有数据就接数据，绝不空泛）；可以带一点你的交易视角；结尾自然表达互相关注、常来往——你刚才已经关注了他，所以可以如实说已关注；禁止链接、话题标签、@其他人。"
+  },
+  "rounds": {
+    "windows": {
+      "am": "10:20",
+      "mid": "15:20",
+      "pm": "20:20"
+    },
+    "quotas": {
+      "community": {
+        "am": 7,
+        "mid": 7,
+        "pm": 6
+      },
+      "follow": {
+        "am": 7,
+        "mid": 7,
+        "pm": 6
+      },
+      "visit": {
+        "am": 4,
+        "mid": 3,
+        "pm": 3
+      },
+      "followBack": 10
+    },
+    "dryRounds": 2,
+    "scanPosts": 30
+  },
+  "task2": {
+    "hashtags": [
+      "蓝V互关",
+      "交个朋友",
+      "交朋友",
+      "浇朋友",
+      "蓝朋友了"
+    ],
+    "repliesPerDay": 20,
+    "keywords": [
+      "互关",
+      "互粉",
+      "串门",
+      "回关",
+      "必回",
+      "求关注"
+    ],
+    "scanPosts": 20
+  },
+  "pacing": {
+    "actionDelayGaussMs": [
+      5000,
+      2000
+    ],
+    "postGapGaussMs": [
+      25000,
+      10000
+    ],
+    "postRestGaussMs": [
+      80000,
+      40000
+    ],
+    "communityReplyGapGaussMs": [
+      45000,
+      15000
+    ],
+    "taskGapGaussMs": [
+      120000,
+      60000
+    ],
+    "readDwellGaussMs": [
+      5000,
+      2000
+    ],
+    "warmupMs": [
+      30000,
+      90000
+    ],
+    "hoverMs": [
+      300,
+      800
+    ]
+  },
+  "templates": {
+    "owen": {
+      "butcher": [
+        "这条产业链拆得够细，HBM 量价这块我最近也在盯，逻辑认同",
+        "盯盘十几年最认这种一手跟踪，订单和产能数据比研报快多了",
+        "老哥这跟踪框架是真家伙，AI 硬件这波的节奏你抓得准",
+        "量化加基本面双修的打法学到了，这篇先存后看",
+        "周前瞻一直跟，这周存储的判断我押同一边",
+        "暴论先放一边，产业数据这部分是真扎实"
+      ],
+      "fullwin": [
+        "又挖到宝了，对产业链的跟踪是真细致，收藏慢慢消化",
+        "这篇含金量高，光模块 CPO 的份额变化要是能月更就更好了",
+        "看完收获很大，想问下这波存储涨价你判断能持续到明年 Q1 吗？",
+        "每天看你的碎碎念已成习惯，这篇尤其干",
+        "风险提示给得也到位，这种客观视角在 X 上不多见",
+        "从 AI 工具到硬件跟踪全都覆盖，难怪说全栈，服气"
+      ]
+    },
+    "owenShort": {
+      "butcher": [
+        "跟上，这篇展开讲讲？",
+        "前排，这个方向我有同感",
+        "盯住了 👀",
+        "mark，晚点细看"
+      ],
+      "fullwin": [
+        "学到了，蹲一个后续",
+        "这个观点有意思，等展开",
+        "支持，常来串门 👋",
+        "关注了，内容很对口"
+      ]
+    },
+    "community": [
+      "互关走起，常来串门 🤝",
+      "互相成就，欢迎来我主页串门 🤝",
+      "串门啦，互关互赞一起玩 🤝",
+      "交个朋友，常来常往 🤝",
+      "来了老哥，互关 +1 🤝",
+      "一起涨一起玩，多多来往 🤝"
+    ],
+    "owenMacro": {
+      "butcher": [
+        "加息预期这个计入程度我也在看，双击逻辑成立的话盘面会给答案",
+        "财报季就得这么拆，预期差才是交易机会",
+        "恐慌里找确定性，这个思路跟我这些年的打法一致",
+        "宏观这条线你盯得紧，开盘见分晓"
+      ],
+      "fullwin": [
+        "财报解读很清晰，收藏了，等开盘验证",
+        "这种宏观拆解对新手太友好了，逻辑跟得上",
+        "预期和事实的差值才是重点，学到了",
+        "盘前看你的判断已成习惯，稳住心态跟着看"
+      ]
+    },
+    "owenAI": {
+      "butcher": [
+        "ARR 口径这个坑很多人踩，官方和非官方差的就是预期管理",
+        "AI 公司估值现在就看收入质量，你拆的这个角度很实在",
+        "放缓与否不看标题看数据，这研究方法对路",
+        "AI 板块现在情绪波动大，这种基本面锚点太需要了"
+      ],
+      "fullwin": [
+        "官方口径和非官方口径这个对比太关键了，收藏慢慢看",
+        "事实和预期的拆解很扎实，期待后续跟踪",
+        "AI 行业就需要这种较真数据的内容，支持",
+        "这个研究角度很独到，等你的结论更新"
+      ]
+    },
+    "owenGeneric": {
+      "butcher": [
+        "这篇有货，先存后看",
+        "这个角度不错，蹲后续",
+        "跟了，这个判断我有同感"
+      ],
+      "fullwin": [
+        "内容很扎实，支持",
+        "又学到新东西了，感谢分享",
+        "这个视角很独到，收藏了"
+      ]
+    }
+  },
+  "posts": {
+    "perWindow": 2,
+    "perDay": 10
+  }
+}

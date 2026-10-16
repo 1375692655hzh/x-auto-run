@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>监控页面 v2 · 设计稿（示例数据，待认可）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", system-ui, sans-serif; background: #eef1f5; color: #1c2733; font-size: 14px; padding-bottom: 60px; }
+  .draft-banner { background: #6d5a1e; color: #fff; text-align: center; font-size: 12px; padding: 6px; letter-spacing: 1px; }
+  .app { display: flex; max-width: 1280px; margin: 0 auto; min-height: 90vh; }
+  .side { width: 210px; background: #10202e; color: #cfe0ee; padding: 18px 12px; flex-shrink: 0; }
+  .side h1 { font-size: 15px; color: #fff; margin-bottom: 3px; }
+  .side .sub { font-size: 11px; color: #7d95a8; margin-bottom: 16px; }
+  .acct { padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; }
+  .acct.on { background: #24557a; color: #fff; }
+  .acct .h { font-size: 11px; opacity: .75; margin-top: 2px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #35c46f; }
+  .main { flex: 1; padding: 16px 22px; }
+  .topbar { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+  .tabs button { border: none; background: #dfe6ed; padding: 7px 24px; font-size: 14px; border-radius: 8px 8px 0 0; cursor: pointer; color: #51606e; }
+  .tabs button.on { background: #fff; color: #111; font-weight: 700; }
+  .card { background: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(16,32,46,.07); }
+  .card h3 { font-size: 13px; color: #51606e; font-weight: 700; margin-bottom: 10px; }
+  .card h3 .src { font-weight: 400; font-size: 11px; color: #98a5b1; margin-left: 8px; }
+  .grid6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .metric { border: 1px solid #e4eaf0; border-radius: 9px; padding: 10px 12px; }
+  .metric .label { font-size: 12px; color: #6b7885; }
+  .metric .val { font-size: 24px; font-weight: 800; margin: 2px 0 1px; }
+  .metric .delta { font-size: 11px; }
+  .up { color: #1f9d55; } .down { color: #d64545; } .flat { color: #98a5b1; }
+  .ratio-ok { color: #1f9d55; } .ratio-warn { color: #c2761b; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .dim { border: 1px solid #e4eaf0; border-radius: 9px; padding: 10px 12px; text-align: center; }
+  .dim .icon { font-size: 18px; }
+  .dim .name { font-size: 13px; font-weight: 700; margin: 2px 0; }
+  .dim .st { font-size: 11px; }
+  .ok-t { color: #1f9d55; } .unk-t { color: #98a5b1; } .wait-t { color: #c2761b; }
+  .flex2 { display: grid; grid-template-columns: 5fr 7fr; gap: 12px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border-bottom: 1px solid #edf1f5; padding: 6px 8px; font-size: 12.5px; text-align: center; }
+  th { color: #6b7885; font-weight: 600; background: #f7fafc; }
+  td.l { text-align: left; }
+  .badge { display: inline-block; font-size: 10px; border-radius: 4px; padding: 1px 6px; margin-left: 5px; }
+  .badge.new { background: #e3f0fb; color: #2563a8; font-weight: 700; }
+  .badge.st { background: #eef2f5; color: #6b7885; }
+  .bars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .bar-row { font-size: 12px; }
+  .track { background: #e8edf2; border-radius: 6px; height: 12px; margin-top: 3px; overflow: hidden; }
+  .fill { height: 100%; background: #3d8fd1; }
+  .tasktable th, .tasktable td { border: 1px solid #e2e8ee; padding: 8px 9px; font-size: 12.5px; text-align: center; vertical-align: middle; }
+  .tasktable { table-layout: fixed; }
+  .t-name { font-weight: 700; font-size: 13px; }
+  .t-desc { font-size: 11.5px; color: #6b7885; line-height: 1.4; }
+  .cell-n { font-weight: 700; font-size: 13px; }
+  .cell-t { color: #6d7c8a; font-size: 10.5px; display: block; }
+  td.fillc { background: #eefaf2; }
+  td.dimc { color: #c3ccd4; }
+  .foot-note { font-size: 11px; color: #98a5b1; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="draft-banner">设 计 稿 v2 · 全部为示例数据 · 仅供确认布局与内容 · 你认可后才接入真实数据</div>
+<div class="app">
+  <div class="side">
+    <h1>X 运营监控</h1>
+    <div class="sub">本地只读 · localhost</div>
+    <div class="acct on"><span class="dot"></span>butcher<div class="h">@MarketButcher88 · 125粉</div></div>
+    <div class="acct"><span class="dot" style="background:#b9bec4"></span>fullwin<div class="h">@Fullwin777 · 4粉</div></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="tabs"><button class="on">数据</button><button>任务</button></div>
+      <span style="font-size:12px;color:#8a97a3">数据更新于 10-16 09:00（每日 1 次，健康/指标同源）</span>
+    </div>
+
+    <!-- ============ 数据页签 ============ -->
+    <div class="card">
+      <h3>核心指标<span class="src">来源：FxTwitter /2/profile + /2/profile/statuses，每日快照差值=增长</span></h3>
+      <div class="grid6">
+        <div class="metric"><div class="label">粉丝量</div><div class="val">125</div><div class="delta up">▲ 今日 +3</div></div>
+        <div class="metric"><div class="label">关注量</div><div class="val">147</div><div class="delta up">▲ 今日 +2</div></div>
+        <div class="metric"><div class="label">关注/粉丝比</div><div class="val ratio-ok">1.18</div><div class="delta flat">健康线 ≤1.8</div></div>
+        <div class="metric"><div class="label">原创帖(累计)</div><div class="val">34</div><div class="delta up">▲ 今日 +1</div></div>
+        <div class="metric"><div class="label">回复(近48h)</div><div class="val">18</div><div class="delta up">▲ 环比 +6</div></div>
+        <div class="metric"><div class="label">转发(近48h)</div><div class="val">2</div><div class="delta flat">环比 ±0</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>健康监测 · 四维度<span class="src">①②④ 每日 FxTwitter 匿名检测；③ 每周二/五观察者窗口深检</span></h3>
+      <div class="grid4">
+        <div class="dim"><div class="icon ok-t">✓</div><div class="name">账号状态</div><div class="st ok-t">正常 · 无敏感标记<br>10-16 09:00</div></div>
+        <div class="dim"><div class="icon ok-t">✓</div><div class="name">搜索建议收录</div><div class="st ok-t">已收录<br>10-16 09:00</div></div>
+        <div class="dim"><div class="icon wait-t">⏳</div><div class="name">搜索可见</div><div class="st wait-t">周检（上次 10-15 通过）<br>下次 10-17</div></div>
+        <div class="dim"><div class="icon unk-t">◐</div><div class="name">回复可见</div><div class="st unk-t">抽查 18/18 可见（辅助口径）<br>10-16 09:00</div></div>
+      </div>
+    </div>
+
+    <div class="flex2">
+      <div class="card">
+        <h3>粉丝走势（近7日快照）</h3>
+        <svg width="100%" height="110" viewBox="0 0 380 110">
+          <polyline points="20,85 80,78 140,74 200,66 260,52 320,38 360,30" fill="none" stroke="#3d8fd1" stroke-width="2"/>
+          <text x="20" y="100" font-size="10" fill="#8a97a3">10-10</text><text x="330" y="100" font-size="10" fill="#8a97a3">10-16</text>
+          <text x="345" y="26" font-size="11" fill="#51606e">125</text>
+        </svg>
+      </div>
+      <div class="card">
+        <h3>关系池 · Top 10<span class="src">得分=互惠分（对方互动×权重+活跃衰减+互关−单向惩罚）</span></h3>
+        <table>
+          <tr><th>#</th><th>对象</th><th>得分</th><th>分层</th><th>对方最近互动</th><th>来源</th></tr>
+          <tr><td>1</td><td class="l">@zhaxinx</td><td><b>2.66</b></td><td><span class="badge st">已接触</span></td><td>10-14 赞</td><td>社区/自通知</td></tr>
+          <tr><td>2</td><td class="l">@yisvin</td><td><b>2.66</b></td><td><span class="badge new">NEW</span></td><td>10-14 赞</td><td>Owen圈</td></tr>
+          <tr><td>3</td><td class="l">@hakecye</td><td><b>2.66</b></td><td><span class="badge new">NEW</span></td><td>10-14 赞</td><td>Owen圈</td></tr>
+          <tr><td>4</td><td class="l">@edwin_csh</td><td><b>2.53</b></td><td><span class="badge new">NEW</span></td><td>10-13 赞</td><td>Owen圈</td></tr>
+          <tr><td>5</td><td class="l">@antiaivo</td><td><b>2.26</b></td><td><span class="badge new">NEW</span></td><td>10-14 赞</td><td>Owen圈</td></tr>
+          <tr><td colspan="6" style="color:#98a5b1">…… 池共 69 人：new 64 · contacted 1 · dormant 4（示例）</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- ============ 任务页签（设计稿第二屏，此处同页展示） ============ -->
+    <div class="card" style="margin-top:16px; border-top:3px solid #3d8fd1">
+      <h3>↓ 以下为「任务」页签内容（额度移到这里）</h3>
+    </div>
+    <div class="card">
+      <h3>今日额度（当日+滚动24h 合并口径）<span class="src">回复总帽/关注/点赞/取关</span></h3>
+      <div class="bars">
+        <div class="bar-row">回复 7/8<div class="track"><div class="fill" style="width:88%"></div></div></div>
+        <div class="bar-row">关注 3/18<div class="track"><div class="fill" style="width:17%"></div></div></div>
+        <div class="bar-row">点赞 6/15<div class="track"><div class="fill" style="width:40%"></div></div></div>
+        <div class="bar-row">取关 0/5<div class="track"><div class="fill" style="width:0%"></div></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>任务执行网格（近2日）<span class="src">行=任务从早到晚 · 列=日期 · 格=完成量+时间，悬停看逐条明细</span></h3>
+      <table class="tasktable">
+        <colgroup><col style="width:300px"><col style="width:100px"><col style="width:110px"><col style="width:110px"><col style="width:110px"></colgroup>
+        <tr><th>任务 / 说明</th><th>执行时间</th><th>目标量</th><th>10-15<br><span style="font-size:10px;color:#8a97a3">周四</span></th><th style="background:#dceafb">10-16<br><span style="font-size:10px;color:#8a97a3">周五</span></th></tr>
+        <tr><td class="l"><div class="t-name">关系池扫描</div><div class="t-desc">只读扫通知页，记录谁赞/回/关注过我们</div></td><td>09:35</td><td>1/天</td><td class="dimc">·</td><td class="fillc"><span class="cell-n">1次</span><span class="cell-t">09:35</span></td></tr>
+        <tr><td class="l"><div class="t-name">图谱点赞</div><div class="t-desc">浏览资讯号后随机赞近3天帖（只赞不评）</div></td><td>10:00 轮内</td><td>2/轮</td><td class="fillc"><span class="cell-n">4赞</span><span class="cell-t">10:02/20:41</span></td><td class="dimc">·</td></tr>
+        <tr><td class="l"><div class="t-name">Owen帖加持</div><div class="t-desc">满45分钟新帖四连（不转发）</div></td><td>10:00 轮内</td><td>2/天</td><td class="fillc"><span class="cell-n">2帖</span><span class="cell-t">10:05/20:44</span></td><td class="dimc">·</td></tr>
+        <tr><td class="l"><div class="t-name">社群互关回复</div><div class="t-desc">互关话题搜最新帖，过滤后回复话术</div></td><td>10:00 轮内</td><td>5/天→6-8</td><td class="fillc"><span class="cell-n">5条</span><span class="cell-t">10:08…</span></td><td class="dimc">·</td></tr>
+      </table>
+      <div class="foot-note">（示例仅列 4 行任务，实际为全部 10 行；空格=当日无记录）</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
