@@ -56,6 +56,7 @@ const TASK_ROWS = [
   ...windowRows('am', '10:20'),
   ...windowRows('mid', '15:20'),
   ...windowRows('pm', '20:20'),
+  { id: 'maintain', t: '随帖', cat: '主动互动', name: '权重维护互动', unit: '次', status: 'on', set: '≤2 帖/目标 · 1 号/帖 · ≤3 次/号（v1.1 拍板）', setNum: null, sug: '维护动作计入当日点赞(≤20)/回复总帽（XActions 分档同前；从被维护账号角度=黄金窗内分散信号）', desc: '侦测器白天每25分钟盯 butcher/Owen 新帖：45min~3h 黄金窗挑帖点赞（butcher 对 Owen 另有≤1条/2天回复）；自然互动占比>1/3 跳过；幽灵/降权熔断' },
   { id: 'passive', t: '随通知', cat: '被动回复', name: '回复他人的回复', unit: '', status: 'pending', set: '不限（你拍板）', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '别人在我们帖下的回复→回应；评论模块待接入' },
   { id: 'report', t: '22:05', cat: '系统运维', name: '每日日报', unit: '份', status: 'on', set: '1 份', setNum: 1, sug: '1/天（复盘频率；XActions 建议每日审计）', desc: '计划任务 Xops日报 自动生成' },
 ];
@@ -89,6 +90,9 @@ function aggregateLogs() {
       else if (j.task === 'mutualScan' && j.action === 'scan') { row = 'mutualScan'; item = `互关 ${j.mutual}/${j.scanned}（${(j.ratio * 100).toFixed(1)}%，覆盖 ${j.coverage}%）`; }
       else if (j.task === 'contacts' && j.action === 'scan') { row = 'scan'; item = `${j.events || '?'}事件/${j.screens || '?'}屏`; }
       else if (j.task === 'radar') { row = 'radar'; item = `双号四维度判定`; }
+      else if (j.task === 'executor' && j.kind === 'maintain' && j.action === 'execute' && (j.status === 'done' || j.status === 'unknown')) {
+        row = 'maintain'; item = `${j.target ? (String(j.target).startsWith('@') ? j.target : '@' + j.target) : j.statusId} ${j.type === 'reply' ? '维护回复' : '维护点赞'}`;
+      }
       else if (j.task === 'executor' && j.action === 'execute' && (j.status === 'done' || j.status === 'unknown')) {
         const w = (String(j.id).match(/-(am|mid|pm)-/) || [])[1] || winByHour;
         let base;
@@ -247,19 +251,19 @@ function buildData() {
     // 行状态如实：唯一存在过的机制是外部 boost.js 加持 Owen（butcher 暂停/fullwin 已收权），其余待接入未授权
     const MT = ['butcher', 'owen'];
     const key2handle = Object.fromEntries(CFG.accounts.map((x) => [x.key, x.handle]));
-    const boost7d = countLogs7d((j) => j.task === 1 && (j.account || 'butcher') === a.key);
+    const boost7d = countLogs7d((j) => (j.task === 1 && (j.account || 'butcher') === a.key) || (j.kind === 'maintain' && j.account === a.key && j.status === 'done')); // 旧四连 + v1.1 维护互动
     const maintain = [];
     for (const t of MT) {
       if (t === a.key) continue; // 不给自己做权重
       const row = { account: '@' + (key2handle[t] || t), type: '权重加持（爱心→书签→复制链接→回复）' };
       const isOwenBoostOwner = t === 'owen' && (a.key === 'butcher' || a.key === 'fullwin');
       if (isOwenBoostOwner) {
-        row.via = '外部任务 boost.js（隔离）';
-        row.status = a.key === 'butcher' ? '暂停中（存废待定）' : '未授权 · 不执行（旧任务已收权）';
-        row.recent = `近7日加持 ${boost7d} 帖` + (a.key === 'butcher' ? '' : '（历史）');
+        row.via = a.key === 'butcher' ? '维护侦测器 maintain-watch（v1.1）' : '维护侦测器 maintain-watch（v1.1）';
+        row.status = a.key === 'butcher' ? '维护中（旧四连已退役）' : '维护中（仅点赞授权）';
+        row.recent = `近7日维护 ${boost7d} 次`;
       } else {
         row.via = '待接入（能力库已具备）';
-        row.status = a.role === 'observer' ? '未启用（观察者号，需放行）' : a.role === 'run' ? '未启用（等你拍板）' : '未授权 · 不执行';
+        row.status = a.role === 'maintain' ? '维护授权·仅点赞（v1.1）' : a.role === 'observer' ? '未启用（观察者号，需放行）' : a.role === 'run' ? '未启用（等你拍板）' : '未授权 · 不执行';
         row.recent = '—';
       }
       maintain.push(row);
@@ -280,7 +284,7 @@ function buildData() {
     ];
     return {
       key: a.key, handle: a.handle, name: acctName || a.key,
-      role: ({ run: '运行号（唯一授权真实互动）', linked: '已接入 · 未授权（不执行任务）', observer: '观察者窗口（只读检测专用）' })[a.role || 'linked'],
+      role: ({ run: '运行号（唯一授权真实互动）', linked: '已接入 · 未授权（不执行任务）', maintain: '已接入 · 维护授权（仅点赞 butcher/owen，v1.1）', observer: '观察者窗口（只读检测专用）' })[a.role || 'linked'],
       roleNote: a.note || '',
       isRun: a.role === 'run',
       verdict: tE ? tE.verdict : null, asOf: todayKey,

@@ -20,9 +20,9 @@
       "profileId": "60a37618910b4cceaa633a1b9e1089cf",
       "handle": "Fullwin777",
       "ui": "ja",
-      "role": "linked",
+      "role": "maintain",
       "watch": true,
-      "note": "已接入·未授权：只做每日只读健康快照（历史延续），不执行任何互动任务"
+      "note": "已接入·维护授权（v1.1：仅对 butcher+owen 点赞；不执行其他任务；回复等雷达连续绿2周后再议）"
     },
     {
       "key": "owen",
@@ -45,6 +45,22 @@
   ],
   "radar": {
     "handles": ["MarketButcher88", "Owenwin888", "Fullwin777", "WCixot"]
+  },
+  "maintain": {
+    "enabled": true,
+    "targets": ["butcher", "owen"],
+    "goldenMinMin": 45,
+    "goldenMaxMin": 180,
+    "postsPerTargetPerDay": 2,
+    "perTargetDailyCap": 5,
+    "perMaintainerDailyCap": 3,
+    "dominanceRatio": 0.34,
+    "replyMinGapHours": 48,
+    "pollFailStop": 5,
+    "maintainers": {
+      "butcher": { "targets": ["owen"], "actions": ["like", "reply"] },
+      "fullwin": { "targets": ["butcher", "owen"], "actions": ["like"] }
+    }
   },
   "limits": {
     "activeHours": [

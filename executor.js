@@ -392,6 +392,11 @@ function executeAction(page, entry) {
       if (WINDOW && e.window && e.window !== WINDOW) continue;
       const ageMin = (Date.now() - Date.parse(e.createdAt)) / 60000;
       if (ageMin > (e.ttlMin || X.queueTtlMinutes)) { e.status = 'skipped'; e.result = 'TTL 过期'; stats.skipped.push(e.id); continue; }
+      // 权重维护条目（v1.1 M2）：按发帖时间复查黄金窗，过期放弃
+      if (e.kind === 'maintain' && e.postAt) {
+        const postAge = (Date.now() - e.postAt) / 60000;
+        if (postAge > ((CFG.maintain || {}).goldenMaxMin || 180)) { e.status = 'skipped'; e.result = `黄金窗已过（帖龄${Math.round(postAge)}分钟）`; stats.skipped.push(e.id); continue; }
+      }
       // 质量门兜底（planner 是第一道，这里是第二道）：不合格直接跳过，不放行
       if (e.type === 'reply') {
         const qc = quality.check(e.text);
@@ -417,12 +422,16 @@ function executeAction(page, entry) {
 
       if (r.ok) { e.status = 'done'; e.result = SIMULATE ? 'simulated' : 'ok'; done += 1; stats.executed.push(e.id); if (e.type === 'reply') { syncContacts(e, 'reply'); recordReply(e); } if (e.type === 'follow') syncContacts(e, 'follow'); }
       else if (r.unknown) { e.status = 'unknown'; e.result = '结果不明（占额度，禁重试，待核）: ' + (r.note || ''); stats.unknown.push(e.id); }
+      // 权重维护（v1.1 M6）：目标帖不可见/已删是目标侧原因，跳过不计失败熔断
+      else if (e.kind === 'maintain' && /未找到目标帖|页面加载失败/.test(r.note || '')) {
+        e.status = 'skipped'; e.result = '目标帖不可见（维护跳过）: ' + (r.note || ''); stats.skipped.push(e.id);
+      }
       else {
         e.status = 'failed'; e.result = r.note || '失败'; fails += 1; stats.failed.push(e.id);
         if (fails >= (L.consecutiveFailAbort || 3)) { sessionAborted = true; }
       }
       saveQueue(queue);
-      log({ action: 'execute', id: e.id, type: e.type, target: e.targetHandle || e.statusId, status: e.status, note: e.result, text: (e.type === 'post' || e.type === 'reply') ? String(e.text).slice(0, 60) : undefined });
+      log({ action: 'execute', kind: e.kind || undefined, id: e.id, type: e.type, target: e.targetHandle || e.statusId, status: e.status, note: e.result, text: (e.type === 'post' || e.type === 'reply') ? String(e.text).slice(0, 60) : undefined });
 
       if (!sessionAborted) {
         const t = await (SIMULATE ? Promise.resolve(null) : riskToast(page));
