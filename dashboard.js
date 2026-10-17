@@ -184,7 +184,9 @@ function buildData() {
     const prevKey = (() => { const before = dates.filter((d) => d < todayKey); return before.length ? before[before.length - 1] : null; })();
     const tE = todayKey ? hist[todayKey] : null;
     const pE = prevKey ? hist[prevKey] : null;
-    const P = (tE && tE.profile) || {};
+    // 慢变量"上次已知值"（10-18 总览发现）：今日快照可能被创建但为空（深夜/检测类写入）——所有日更字段回溯最近含数据的快照
+    const Pdate = [...dates].reverse().find((d) => hist[d] && hist[d].profile && hist[d].profile.followers != null);
+    const P = Pdate ? hist[Pdate].profile : ((tE && tE.profile) || {});
     // 慢变量"上次已知值"语义（10-18 用户拍板）：日更格在今天快照缺该字段时（如轻检日），回溯最近含该字段的快照，不再显示"—"
     const Sdate = [...dates].reverse().find((d) => hist[d] && hist[d].statuses && hist[d].statuses.ownCount != null);
     const S = Sdate ? hist[Sdate].statuses : ((tE && tE.statuses) || {});
