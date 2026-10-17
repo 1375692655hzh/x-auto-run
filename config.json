@@ -251,7 +251,27 @@
       "followBack": 0
     },
     "dryRounds": 2,
-    "scanPosts": 30
+    "scanPosts": 30,
+    "quotasByAccount": {
+      "wcixot": {
+        "community": {
+          "am": 7,
+          "mid": 7,
+          "pm": 6
+        },
+        "visit": {
+          "am": 4,
+          "mid": 3,
+          "pm": 3
+        },
+        "follow": {
+          "am": 7,
+          "mid": 7,
+          "pm": 6
+        },
+        "followBack": 0
+      }
+    }
   },
   "task2": {
     "hashtags": [
