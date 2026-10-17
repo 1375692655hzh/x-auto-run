@@ -27,7 +27,7 @@ const FB = CFG.follow.followBack, UF = CFG.follow.unfollowTimeout;
 // 任务时间线（2026-10-16 重构）：按一天时间排序；多时间节点拆独立行（早/午/晚窗各自成行）。
 // 伪控制面板原则：set=设定量【只显示你实际拍板/config 里真实存在的值，没有就是"未设定"】；
 //                sug=建议量【引擎/参考档位】；status=当前开关状态（对话即控制）。
-const WL = { am: '早', mid: '午', pm: '下', eve: '晚', vam: '早', vpm: '晚' }; // 四窗 8:30/13:00/16:00/20:00（10-18 拍板）
+const WL = { am: '早', mid: '午', pm: '下', eve: '晚', p1: '早', p2: '午', p3: '晚' }; // 四互关窗+三发布窗（09:35/12:35/19:35 与云端生成完成对齐）
 const Q = ((CFG.rounds || {}).quotas) || {};
 function windowRows(w, t) { // 互关窗行（10-18 拍板：四窗 8:30/13:00/16:00/20:00 只服务互关）
   const f = (m) => ((m || {})[w] != null ? m[w] : null);
@@ -46,7 +46,7 @@ function vpRows(w, t) { // 串门+发布窗行（10:30/20:30，独立于互关�
   const f = (m) => ((m || {})[w] != null ? m[w] : null);
   return [
     { id: `post:${w}`, t, cat: '原创发布', name: `原创发布·${WL[w]}档`, unit: '帖', status: 'wait-feed', set: `${((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[w] ?? 0} 帖（拍板 Gentle ${((CFG.posts || {}).budget || {}).perDay || 2} 条/天）`, setNum: ((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[w] ?? null, sug: '1-2/天起步→≤5/天（XActions Gentle2~Normal5；官方50/天硬顶；X算法：每帖2h黄金窗，多发互相稀释）',
-      desc: '10:30 档发云端 9 点档内容 / 20:30 档发 18 点档内容（拉取 09:50/19:10 即投即发）' },
+      desc: '发布窗 09:35/12:35/19:35 与云端生成完成时刻对齐：窗内先拉取（p1 发 9 点档/p2 发 12 点档/p3 发 18 点档）→滴灌→即发' },
     { id: `visit:${w}`, t, cat: '主动互动', name: `关系池串门·${WL[w]}档`, unit: '条', status: 'on', set: `${f(Q.visit)} 条（你拍板）`, setNum: f(Q.visit), sug: '回复类合计≤5-10/天=低风险档（XActions 回复分档；官方200/天硬顶）',
       desc: '互惠分选人→对方最新帖留言（LLM+质量门，限频7/21天，近14天真关系口径）' },
   ];
@@ -62,8 +62,9 @@ const TASK_ROWS = [
   ...windowRows('mid', '13:00'),
   ...windowRows('pm', '16:00'),
   ...windowRows('eve', '20:00'),
-  ...vpRows('vam', '10:30'),
-  ...vpRows('vpm', '20:30'),
+  ...vpRows('p1', '09:35'),
+  ...vpRows('p2', '12:35'),
+  ...vpRows('p3', '19:35'),
   { id: 'maintain', t: '随帖', cat: '主动互动', name: '权重维护互动', unit: '次', status: 'on', set: '≤2 帖/目标 · 1 号/帖 · ≤3 次/号（v1.1 拍板）', setNum: null, sug: '维护动作计入当日点赞(≤20)/回复总帽（XActions 分档同前；从被维护账号角度=黄金窗内分散信号）', desc: '侦测器白天每25分钟盯 butcher/Owen 新帖：45min~3h 黄金窗挑帖点赞（butcher 对 Owen 另有≤1条/2天回复）；自然互动占比>1/3 跳过；幽灵/降权熔断' },
   { id: 'verifyReply', t: '随窗(+40分)', cat: '系统运维', name: '回复可见性抽查', unit: '次', status: 'on', set: '每窗后 1 次 ×1-2 条（v1.1）', setNum: 1, sug: '事件触发 3 次/天（零暴露直测回复隐藏风险；与雷达交叉验证）', desc: '10:55/16:00/21:00 匿名核验刚发回复外部可见性；连续2天<50%自动触发雷达复测' },
   { id: 'passive', t: '随通知', cat: '被动回复', name: '回复他人的回复', unit: '', status: 'pending', set: '不限（你拍板）', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '别人在我们帖下的回复→回应；评论模块待接入' },
@@ -89,7 +90,7 @@ function aggregateLogs() {
       const hhmm = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
       let row = null, item = null;
       const hour0 = t.getHours();
-      const winByHour = hour0 < 10 ? 'am' : hour0 < 12 ? 'vam' : hour0 < 15 ? 'mid' : hour0 < 18 ? 'pm' : hour0 < 20 ? 'vpm' : 'eve'; // 旧系统无窗字段按时段归属
+      const winByHour = hour0 < 10 ? 'am' : hour0 < 12 ? 'p1' : hour0 < 13 ? 'p2' : hour0 < 15 ? 'mid' : hour0 < 18 ? 'pm' : hour0 < 20 ? 'p3' : 'eve'; // 旧系统无窗字段按时段归属
       if (j.task === 'graph' && j.action === 'like') { row = 'graph'; item = `@${j.target} 帖${String(j.post).slice(-4)}`; }
       else if (j.task === 1) { row = 'owen'; item = `帖${String(j.post).slice(-4)} ${(j.actions || []).join('+')}`; }
       else if (j.task === 2) { row = `community:${winByHour}`; item = `@${j.author}「${String(j.text || '').slice(0, 18)}」`; }
@@ -104,7 +105,7 @@ function aggregateLogs() {
         row = 'maintain'; item = `${j.target ? (String(j.target).startsWith('@') ? j.target : '@' + j.target) : j.statusId} ${j.type === 'reply' ? '维护回复' : '维护点赞'}`;
       }
       else if (j.task === 'executor' && j.action === 'execute' && (j.status === 'done' || j.status === 'unknown')) {
-        const w = (String(j.id).match(/-(am|mid|pm|eve|vam|vpm)-/) || [])[1] || winByHour;
+        const w = (String(j.id).match(/-(am|mid|pm|eve|p1|p2|p3)-/) || [])[1] || winByHour;
         let base;
         if (j.type === 'post') base = 'post';
         else if (j.type === 'follow') base = /-fb-/.test(j.id) ? 'followBack' : /-frb-/.test(j.id) ? 'followReply' : 'follow';

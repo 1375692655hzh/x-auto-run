@@ -22,9 +22,9 @@ function log(line) {
   fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: new Date().toISOString(), task: 'round', account: ACCOUNT, ...line }) + '\n');
 }
 
-const run = (args) => {
+const run = (args, opts = {}) => {
   console.log(`\n===== ${args.join(' ')} =====`);
-  const r = spawnSync(process.execPath, args.map((a) => a.replace(/^node\s+/, '')), { cwd: ROOT, stdio: 'inherit' });
+  const r = spawnSync(process.execPath, args.map((a) => a.replace(/^node\s+/, '')), { cwd: ROOT, stdio: 'inherit', ...opts });
   return r.status === 0;
 };
 
@@ -50,6 +50,10 @@ const run = (args) => {
   const MODES = argOf('modes', WCFG.modes || 'all');
   console.log(`执行窗 ${WINDOW} 开始（${WCFG.time || '?'}，模式: ${MODES}，第 ${rs.completed + 1} 轮，${dry ? '演练模式' : '真实执行模式'}）`);
 
+  // 发布窗内置拉取（10-18 拍板：p1/p2/p3 与云端生成完成时刻 09:35/12:35/19:35 对齐——窗内先拉后滴灌，planner 再拾取发布）
+  if (MODES.includes('pull')) {
+    run([path.join(ROOT, 'content-pull.js')], { env: { ...process.env, NODE_EXTRA_CA_CERTS: path.join(ROOT, 'x-daily-cert.pem') } });
+  }
   const okPlan = run([path.join(ROOT, 'planner.js'), '--account', ACCOUNT, '--mode', MODES, '--window', WINDOW]);
   if (!okPlan) log({ action: 'round', window: WINDOW, note: 'planner 失败' });
 

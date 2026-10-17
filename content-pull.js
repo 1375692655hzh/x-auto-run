@@ -32,7 +32,7 @@ async function fetchJSON(url) {
 }
 
 // 下一执行窗（滴灌目标）：am<10:20 / mid<15:20 / pm 其余
-function nextWindow() { const m = new Date(Date.now() + 8 * 3600000).getUTCHours() * 60 + new Date(Date.now() + 8 * 3600000).getUTCMinutes(); return m < 630 ? 'vam' : m < 1230 ? 'vpm' : 'vam'; } // 发布窗 10:30/20:30（互关窗不发布）
+function nextWindow() { const m = new Date(Date.now() + 8 * 3600000).getUTCHours() * 60 + new Date(Date.now() + 8 * 3600000).getUTCMinutes(); return m < 575 ? 'p1' : m < 755 ? 'p2' : m < 1175 ? 'p3' : 'p1'; } // 发布窗 09:35/12:35/19:35（分钟界 575/755/1175）
 // 今日已入队帖数（该号）：扫今日三窗队列里 type=post 且未跳过的条目
 function enqueuedToday(local) {
   let n = 0;

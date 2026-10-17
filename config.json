@@ -244,13 +244,17 @@
         "time": "20:00",
         "modes": "community,replyfollowback"
       },
-      "vam": {
-        "time": "10:30",
-        "modes": "visit,post"
+      "p1": {
+        "time": "09:35",
+        "modes": "pull,visit,post"
       },
-      "vpm": {
-        "time": "20:30",
-        "modes": "visit,post"
+      "p2": {
+        "time": "12:35",
+        "modes": "pull,visit,post"
+      },
+      "p3": {
+        "time": "19:35",
+        "modes": "pull,visit,post"
       }
     },
     "quotas": {
@@ -261,8 +265,9 @@
         "eve": 6
       },
       "visit": {
-        "vam": 5,
-        "vpm": 5
+        "p1": 3,
+        "p2": 3,
+        "p3": 4
       },
       "followBack": 0,
       "replyFollowBack": {
@@ -283,8 +288,9 @@
           "eve": 5
         },
         "visit": {
-          "vam": 5,
-          "vpm": 5
+          "p1": 3,
+          "p2": 3,
+          "p3": 4
         },
         "followBack": 0
       }
@@ -431,8 +437,9 @@
     "budget": {
       "perDay": 2,
       "windowAllocation": {
-        "vam": 1,
-        "vpm": 1
+        "p1": 1,
+        "p2": 0,
+        "p3": 1
       },
       "note": "Gentle 起步档（XActions 2/天；X算法：隔窗发布每帖独占2h黄金窗防稀释）。2026-10-18 用户拍板'按推荐执行'。升级到 Normal(5/天) 需量化条件触发呈报+人工拍板：14天零限流+雷达绿+账龄≥30天+丢弃量佐证；周末投递 10-18 用户拍板放开（云端已 7x24）"
     },
@@ -440,8 +447,9 @@
       "wcixot": {
         "perDay": 2,
         "windowAllocation": {
-          "vam": 1,
-          "vpm": 1
+          "p1": 1,
+          "p2": 0,
+          "p3": 1
         },
         "note": "同 butcher Gentle 档（10-18 接入拍板）"
       }
