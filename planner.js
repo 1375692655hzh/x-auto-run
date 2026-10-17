@@ -353,7 +353,7 @@ async function planPost(ts) {
     // P7 多号防串号（10-18 wcixot 接入前置）：只拾取本账号前缀 pull-<ACCOUNT>-* 与手动投放的非 pull- 前缀文件；他号的投递绝不跨号消费；C1：.done- 归档绝不再扫
     files = fs.readdirSync(POSTS_INBOX).filter((f) => ((f.startsWith(`pull-${ACCOUNT}-`) || !f.startsWith('pull-')) && f.endsWith('.json') && !f.includes('.done-')) || f.endsWith('.txt'));
   } catch { return []; }
-  const texts = [];
+  const texts = []; // 元素为 {text, quote?, quoteUrl?}（10-18 引用帖）
   const usedFiles = [];
   for (const f of files) {
     let items = [];
@@ -363,7 +363,7 @@ async function planPost(ts) {
       else { const j = JSON.parse(raw); const arr = Array.isArray(j) ? j : (j.items || j.posts || []); items = arr.map((x) => (typeof x === 'string' ? { text: x } : x)).filter((x) => x && x.text); }
     } catch { console.log(`  投递文件解析失败: ${f}`); continue; }
     usedFiles.push(f);
-    for (const it of items) texts.push(it.text.trim());
+    for (const it of items) texts.push({ text: String(it.text).trim(), quote: !!it.quote, quoteUrl: it.quoteUrl || it.quote_url || null });
     if (texts.length >= cap + 5) break;
   }
   if (!texts.length) { console.log('posts-inbox/ 无待发内容'); return []; }
@@ -374,12 +374,12 @@ async function planPost(ts) {
   const out = [];
   for (const t of texts) {
     if (out.length >= cap - inWindow) break;
-    if (!t || seen.has(t)) { console.log('  跳过（空/重复）:', String(t).slice(0, 24)); continue; }
-    const wl = quality.weightedLen(t);
-    if (wl > 280) { console.log(`  跳过（超长 ${wl}>280）:`, t.slice(0, 24)); continue; }
-    seen.add(t); // C2 修复：选中即入去重集（同批相同文本不再二次入队）
-    out.push({ id: `${today()}-${WINDOW}-post-${baseId + out.length + 1}`, account: ACCOUNT, type: 'post', kind: 'post', text: t, window: WINDOW, jitterSec: 60 + Math.floor(Math.random() * 120), status: 'planned', createdAt: new Date().toISOString() }); // jitterSec：发帖窗内 60-180s 随机偏移防整点指纹（三方方案 P4）
-    console.log(`  发布入队（${wl}字重）: ${t.slice(0, 32)}…`);
+    if (!t || !t.text || seen.has(t.text)) { console.log('  跳过（空/重复）:', String(t.text).slice(0, 24)); continue; }
+    const wl = quality.weightedLen(t.text);
+    if (wl > 280) { console.log(`  跳过（超长 ${wl}>280）:`, t.text.slice(0, 24)); continue; }
+    seen.add(t.text); // C2 修复：选中即入去重集（同批相同文本不再二次入队）
+    out.push({ id: `${today()}-${WINDOW}-post-${baseId + out.length + 1}`, account: ACCOUNT, type: 'post', kind: 'post', text: t.text, quote: t.quote || undefined, quoteUrl: t.quoteUrl || undefined, window: WINDOW, jitterSec: 60 + Math.floor(Math.random() * 120), status: 'planned', createdAt: new Date().toISOString() }); // jitterSec：发帖窗内 60-180s 随机偏移防整点指纹（三方方案 P4）
+    console.log(`  发布入队（${wl}字重${t.quote ? '·引用帖' : ''}）: ${t.text.slice(0, 32)}…`);
   }
   // 消费投递文件（改名留审计；后缀去掉 .json 防重扫=C1 双保险；未入队的超额内容保留在 .done 里不丢）
   for (const f of usedFiles) { try { fs.renameSync(path.join(POSTS_INBOX, f), path.join(POSTS_INBOX, f + '.done-' + Date.now())); } catch { } }

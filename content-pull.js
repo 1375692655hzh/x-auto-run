@@ -68,7 +68,7 @@ function enqueuedToday(local) {
         const h = it.text_hash || sha(it.text); // 全文哈希回退（Codex：比前64字符更稳）
         if (st.pulled[h]) continue;
         st.pulled[h] = new Date().toISOString();
-        st.buffer.push({ text: it.text, hash: h, slot: it.slot, sentAt: it.sent_at }); // send_ok 不消费（说明书 v2）
+        st.buffer.push({ text: it.text, hash: h, slot: it.slot, sentAt: it.sent_at, quote: !!it.quote, quoteUrl: it.quote_url || null }); // quote/quote_url（说明书 v3 引用帖标记，云端保证每档≤4）；send_ok 不消费
         fresh += 1;
       }
       await sleep(1200);
@@ -101,7 +101,7 @@ function enqueuedToday(local) {
       if (drip <= 0) why = `预算/缓冲不足(${w}窗=${alloc}，今日已入队=${enqueuedToday(b.local)}，缓冲=${st.buffer.length})`;
       else if (!DRY) {
         const batch = st.buffer.splice(0, drip);
-        writeJson(path.join(INBOX, `pull-${b.local}-${Date.now()}.json`), batch.map((x) => ({ text: x.text })));
+        writeJson(path.join(INBOX, `pull-${b.local}-${Date.now()}.json`), batch.map((x) => ({ text: x.text, quote: x.quote || undefined, quoteUrl: x.quoteUrl || undefined })));
         wrote = drip;
         // 即时轻通道（仅非 run 授权号）：拉起该号自己的 planner(post)+executor；带健康门（suspended/敏感→不发）
         if (roleOf(b.local) !== 'run' && drip > 0) {

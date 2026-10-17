@@ -338,7 +338,40 @@ async function postTweet(page, text) {
   if (r !== true) return { ok: r === true, unknown: r === 'unknown', raw: r };
   // C3 语义分叉（三方方案）：读 toast 区分"新发"vs"已存在"（发过了/already=重复，非新发成功）
   const toast = await page.evaluate(() => ((document.querySelector('[data-testid="toast"]') || {}).textContent || '').trim()).catch(() => '');
-  return /发过|already/i.test(toast || '') ? { ok: true, note: '已存在（重复，非本次新发）' } : { ok: true, note: '新发' };
+  return /发过|already/i.test(toast || '') ? { ok: true, note: '已存在（重复，非本次新发）' } : { ok: true, note: quoteUrl ? '新发·引用帖' : '新发' };
+}
+
+// 引用帖（10-18 云端 quote 标记）：进原帖 → 转推按钮 → 菜单"引用" → 带卡片弹窗输入提交
+// compose/post/<id> 直链实测 404、intent?url= 只会把链接当正文（10-18 诊断），UI 路径是唯一正路
+async function postQuote(page, text, quoteUrl) {
+  const m = /status\/(\d+)/.exec(String(quoteUrl));
+  if (!m) return { ok: false, note: 'quote_url 无 statusId，跳过不发' };
+  if (!(await gotoFeed(page, quoteUrl))) return { ok: false, note: '原帖页加载失败，跳过不发' };
+  await gsleep(CFG.pacing.readDwellGaussMs);
+  const art = await findArticleByStatus(page, m[1]);
+  if (!art) return { ok: false, note: '按 statusId 未找到原帖（可能已删），跳过不发' };
+  const rt = await art.$('[data-testid="retweet"]');
+  if (!rt) return { ok: false, note: '转推按钮未找到' };
+  await humanClick(page, rt);
+  await sleep(1200);
+  // 菜单项多语言：引用帖子/引用贴文/引用/Quote post/ポストを引用（bitbrowser 基建三语惯例）
+  const clicked = await page.evaluate(() => {
+    const items = [...document.querySelectorAll('[role="menuitem"]')];
+    const q = items.find((el) => /引用|^quote/i.test((el.textContent || '').trim()));
+    if (!q) return false;
+    q.click();
+    return true;
+  }).catch(() => false);
+  if (!clicked) return { ok: false, note: '引用菜单项未找到' };
+  await page.waitForSelector(SEL.replyBox, { timeout: 12000 }).catch(() => { });
+  await sleep(2500);
+  if (!(await page.$(SEL.replyBox))) return { ok: false, note: '引用编辑框未出现' };
+  if (!(await typeReply(page, text))) return { ok: false, note: '输入失败' };
+  await sleep(800);
+  const r = await submitReply(page);
+  if (r !== true) return { ok: r === true, unknown: r === 'unknown', raw: r };
+  const toast = await page.evaluate(() => ((document.querySelector('[data-testid="toast"]') || {}).textContent || '').trim()).catch(() => '');
+  return /发过|already/i.test(toast || '') ? { ok: true, note: '已存在（重复，非本次新发）' } : { ok: true, note: '新发·引用帖' };
 }
 
 function executeAction(page, entry) {
@@ -346,7 +379,7 @@ function executeAction(page, entry) {
   if (entry.type === 'reply') return replyToPost(page, entry);
   if (entry.type === 'follow') return followUser(page, entry.targetHandle);
   if (entry.type === 'unfollow') return unfollowUser(page, entry.targetHandle);
-  if (entry.type === 'post') return postTweet(page, entry.text);
+  if (entry.type === 'post') return entry.quote && entry.quoteUrl ? postQuote(page, entry.text, entry.quoteUrl) : postTweet(page, entry.text);
   return likePost(page, entry);
 }
 
