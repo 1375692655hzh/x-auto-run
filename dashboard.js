@@ -315,7 +315,8 @@ function buildData() {
   let inboxHas = false;
   try { inboxHas = fs.readdirSync(path.join(ROOT, 'posts-inbox')).some((f) => (f.endsWith('.json') || f.endsWith('.txt')) && !f.includes('.done')); } catch { }
   const taskRows = TASK_ROWS.map((r) => /^post:/.test(r.id) && inboxHas ? { ...r, status: 'ready-feed' } : r);
-  return { generatedAt: new Date().toISOString(), days: DAYS_ARR, hdays: HDAYS_ARR, taskRows, reports, accounts };
+  const postsBudget = Object.assign({ butcher: (CFG.posts || {}).budget }, (CFG.posts || {}).budgetByAccount || {});
+  return { generatedAt: new Date().toISOString(), days: DAYS_ARR, hdays: HDAYS_ARR, taskRows, reports, accounts, postsBudget };
 }
 function normalizeGrid(g) {
   const out = {};
@@ -610,7 +611,12 @@ function renderTask(a) {
     h += '<tr class="' + (row.status === 'on' && a.isRun ? 'row-on' : 'row-off') + '"><td class="ttime">' + esc(row.t) + '</td>'
       + '<td class="l"><span class="cat-tag">' + esc(row.cat) + '</span> <span class="t-name">' + esc(row.name) + '</span><div class="t-desc" title="' + esc(row.desc) + '">' + esc(row.desc) + '</div></td>'
       + '<td class="' + st[1] + '" style="font-size:11px;font-weight:600">' + st[0] + '</td>'
-      + '<td class="tgt"><span class="set">' + (a.isRun ? esc(row.set) : '—') + '</span></td>' // 设定量=butcher 拍板值，接入号显示"—"避免误读
+      + '<td class="tgt"><span class="set">' + (() => {
+        // 发布行例外（10-18 wcixot 接入）：有内容源发布预算的账号（run 号或 budgetByAccount 号）显示自己的拍板值，其余照旧"—"
+        const pm = /^post:(\\w+)$/.exec(row.id); // 注意：模板字符串内正则转义必须双反斜杠（10-16 已立规矩，10-18 又踩一次）
+        if (pm && DATA.postsBudget && DATA.postsBudget[CUR]) { const pb = DATA.postsBudget[CUR]; return ((pb.windowAllocation || {})[pm[1]] ?? 0) + ' 帖（拍板 Gentle ' + (pb.perDay || 2) + ' 条/天）'; }
+        return a.isRun ? esc(row.set) : '—';
+      })() + '</span></td>'
       + '<td class="tgt"><span class="sug">' + sugFmt(row.sug) + '</span></td>';
     for (var c = 0; c < DATA.days.length; c++) {
       var d = DATA.days[c];

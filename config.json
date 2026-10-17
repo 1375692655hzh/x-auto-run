@@ -40,15 +40,23 @@
       "ui": "zh-CN",
       "role": "observer",
       "watch": true,
-      "note": "观察者窗口：只读检测（限流雷达渲染通道+自身健康日检），永不互动；另有独立取关自动化不归本工具管"
+      "note": "观察者窗口：只读检测（雷达渲染）+ 内容发布授权（10-18 用户拍板，WCixot 源·Gentle 2/天·即时通道）；不做其他互动；独立取关自动化不归本工具管"
     }
   ],
   "radar": {
-    "handles": ["MarketButcher88", "Owenwin888", "Fullwin777", "WCixot"]
+    "handles": [
+      "MarketButcher88",
+      "Owenwin888",
+      "Fullwin777",
+      "WCixot"
+    ]
   },
   "maintain": {
     "enabled": true,
-    "targets": ["butcher", "owen"],
+    "targets": [
+      "butcher",
+      "owen"
+    ],
     "goldenMinMin": 45,
     "goldenMaxMin": 180,
     "postsPerTargetPerDay": 2,
@@ -58,8 +66,24 @@
     "replyMinGapHours": 48,
     "pollFailStop": 5,
     "maintainers": {
-      "butcher": { "targets": ["owen"], "actions": ["like", "reply"] },
-      "fullwin": { "targets": ["butcher", "owen"], "actions": ["like"] }
+      "butcher": {
+        "targets": [
+          "owen"
+        ],
+        "actions": [
+          "like",
+          "reply"
+        ]
+      },
+      "fullwin": {
+        "targets": [
+          "butcher",
+          "owen"
+        ],
+        "actions": [
+          "like"
+        ]
+      }
     }
   },
   "limits": {
@@ -185,7 +209,8 @@
     "lockStaleMinutes": 30
   },
   "personas": {
-    "butcher": "你是 X 账号 @MarketButcher88 的运营者本人。人设：二十年美股交易员，常驻弗吉尼亚，主业盯美股，兼看加密货币和 AI 行业动态；性格直接犀利、不绕弯，重数据和一手信息、轻故事和情绪，带老手式的冷幽默；中文表达口语自然，像交易圈老炮聊天；不喊单、不吹捧、不用感叹号轰炸、不装年轻人。"
+    "butcher": "你是 X 账号 @MarketButcher88 的运营者本人。人设：二十年美股交易员，常驻弗吉尼亚，主业盯美股，兼看加密货币和 AI 行业动态；性格直接犀利、不绕弯，重数据和一手信息、轻故事和情绪，带老手式的冷幽默；中文表达口语自然，像交易圈老炮聊天；不喊单、不吹捧、不用感叹号轰炸、不装年轻人。",
+    "wcixot": "@WCixot 运营号：内容主体来自云端内容源成品（不经本地 LLM 生成）。此 persona 仅作占位防 planner 退出；若未来启用 LLM 任务再按简介重写。"
   },
   "prompts": {
     "visit": "关系维护留言：对方之前跟我们互动过。真诚回应他这条帖子的具体内容——认可其中某个具体观点或数据，或补充一点你自己的交易视角；语气像老朋友串门，可以自然说一句常来往；不要引导互关（已经是朋友关系），不要任何敷衍套话。",
@@ -358,8 +383,23 @@
     "perDay": 10,
     "budget": {
       "perDay": 2,
-      "windowAllocation": { "am": 1, "mid": 0, "pm": 1 },
+      "windowAllocation": {
+        "am": 1,
+        "mid": 0,
+        "pm": 1
+      },
       "note": "Gentle 起步档（XActions 2/天；X算法：隔窗发布每帖独占2h黄金窗防稀释）。2026-10-18 用户拍板'按推荐执行'。升级到 Normal(5/天) 需量化条件触发呈报+人工拍板：14天零限流+雷达绿+账龄≥30天+丢弃量佐证"
+    },
+    "budgetByAccount": {
+      "wcixot": {
+        "perDay": 2,
+        "windowAllocation": {
+          "am": 1,
+          "mid": 0,
+          "pm": 1
+        },
+        "note": "同 butcher Gentle 档（10-18 接入拍板）"
+      }
     }
   }
 }

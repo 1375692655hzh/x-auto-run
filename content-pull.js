@@ -84,23 +84,40 @@ function enqueuedToday(local) {
     const pk = Object.entries(st.pulled).sort((a, c) => Date.parse(c[1]) - Date.parse(a[1]));
     st.pulled = Object.fromEntries(pk.slice(0, 500));
 
-    // 滴灌决策
+    // 滴灌决策（10-18 wcixot 接入：授权完全由绑定三开关表达——publishAuth 本身就是用户给的发布授权，不再要求 role=run；
+    //   非 run 的发布授权号（如 wcixot）走"拉取后即时轻通道"：滴灌完直接拉起 planner(post)+executor，不占 butcher 三窗）
     let wrote = 0, why = '';
-    const canPublish = b.bound && b.publishAuth && b.publish && roleOf(b.local) === 'run';
+    const canPublish = b.bound && b.publishAuth && b.publish;
     const unconsumed = fs.existsSync(INBOX) ? fs.readdirSync(INBOX).filter((f) => f.startsWith(`pull-${b.local}-`) && f.endsWith('.json')) : [];
     if (keyFailed) why = 'key失效全停';
-    else if (!canPublish) why = `未授权/未开闸(publishAuth=${b.publishAuth},publish=${b.publish},role=${roleOf(b.local)})`;
+    else if (!canPublish) why = `未授权/未开闸(publishAuth=${b.publishAuth},publish=${b.publish})`;
     else if (isWeekend) why = '周末不投递（拍板 P5）';
     else if (unconsumed.length) why = `投递箱未消费(${unconsumed.join(',')})`;
     else {
+      const BA = (CFG.posts && CFG.posts.budgetByAccount || {})[b.local] || BUDGET;
       const w = nextWindow();
-      const alloc = (BUDGET.windowAllocation || {})[w] ?? 0;
-      const drip = Math.min(alloc, (BUDGET.perDay || 2) - enqueuedToday(b.local), st.buffer.length);
+      const alloc = (BA.windowAllocation || {})[w] ?? 0;
+      const drip = Math.min(alloc, (BA.perDay || 2) - enqueuedToday(b.local), st.buffer.length);
       if (drip <= 0) why = `预算/缓冲不足(${w}窗=${alloc}，今日已入队=${enqueuedToday(b.local)}，缓冲=${st.buffer.length})`;
       else if (!DRY) {
         const batch = st.buffer.splice(0, drip);
         writeJson(path.join(INBOX, `pull-${b.local}-${Date.now()}.json`), batch.map((x) => ({ text: x.text })));
         wrote = drip;
+        // 即时轻通道（仅非 run 授权号）：拉起该号自己的 planner(post)+executor；带健康门（suspended/敏感→不发）
+        if (roleOf(b.local) !== 'run' && drip > 0) {
+          let gate = '通过';
+          try {
+            const snap = readJson(path.join(STATE_DIR, 'health-snapshots', `${bjDate(0)}.json`), {});
+            const e = snap.accounts && snap.accounts[b.local];
+            if (e && ((e.verdict === 'suspended') || (e.profile && e.profile.state === 'suspended') || (e.statuses && (e.statuses.sensitiveCount || 0) > 0))) gate = '停发';
+          } catch { }
+          if (gate === '停发') { why = '健康门：停发（suspended/敏感标记），投递保留待下轮'; wrote = 0; st.buffer = batch.concat(st.buffer); }
+          else {
+            const { spawn } = require('child_process');
+            spawn(process.execPath, [path.join(ROOT, 'planner.js'), '--account', b.local, '--mode', 'post', '--window', w], { detached: true, stdio: 'ignore', cwd: ROOT }).unref();
+            LOG(`[${b.local}] 即时通道：planner(post,${w}) 已拉起（run 号走三窗，此号拉完即排）`);
+          }
+        }
       } else why = `[DRY] 应滴灌 ${drip} 条（未写入）`;
     }
     if (!DRY) writeJson(bufFile, st);

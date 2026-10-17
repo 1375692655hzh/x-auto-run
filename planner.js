@@ -339,13 +339,17 @@ async function planUnfollow(ts) {
 const POSTS_INBOX = path.join(ROOT, 'posts-inbox');
 async function planPost(ts) {
   const PC = Object.assign({ perWindow: 2, perDay: 10 }, CFG.posts || {});
-  // 窗预算硬门（三方方案 2026-10-18）：拍板的 windowAllocation 优先于引擎帽（午窗=0 绝不发），防手工投递绕过
-  const alloc = ((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[WINDOW];
+  // 窗预算硬门（三方方案 2026-10-18）：拍板的 windowAllocation 优先于引擎帽（午窗=0 绝不发），防手工投递绕过；多号各用各的预算（budgetByAccount，10-18 wcixot 接入）
+  const BA = ((CFG.posts || {}).budgetByAccount || {})[ACCOUNT] || (CFG.posts || {}).budget || {};
+  const alloc = (BA.windowAllocation || {})[WINDOW];
   const inWindow = loadQueue(WINDOW).filter((e) => e.kind === 'post' && e.status !== 'skipped').length;
-  const cap = Math.min(alloc != null ? alloc : PC.perWindow, PC.perWindow, PC.perDay - countedToday('post'));
+  const cap = Math.min(alloc != null ? alloc : PC.perWindow, PC.perWindow, (BA.perDay != null ? BA.perDay : PC.perDay) - countedToday('post'));
   if (cap - inWindow <= 0) { console.log('发布预算已满或本窗分配为 0（拍板档位）'); return []; }
   let files = [];
-  try { files = fs.readdirSync(POSTS_INBOX).filter((f) => (f.endsWith('.json') && !f.includes('.done-')) || f.endsWith('.txt')); } catch { return []; } // C1 修复：归档文件绝不再被扫描（曾以 .json 结尾会被重扫致重发）
+  try {
+    // P7 多号防串号（10-18 wcixot 接入前置）：只拾取本账号前缀 pull-<ACCOUNT>-* 与手动投放的非 pull- 前缀文件；他号的投递绝不跨号消费；C1：.done- 归档绝不再扫
+    files = fs.readdirSync(POSTS_INBOX).filter((f) => ((f.startsWith(`pull-${ACCOUNT}-`) || !f.startsWith('pull-')) && f.endsWith('.json') && !f.includes('.done-')) || f.endsWith('.txt'));
+  } catch { return []; }
   const texts = [];
   const usedFiles = [];
   for (const f of files) {
