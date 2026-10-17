@@ -36,7 +36,7 @@ function windowRows(w, t) {
       desc: '绑定内容源（x-daily-serve）→ 拉取增量 hash 去重 → 缓冲 48h → 按窗预算滴灌 posts-inbox → 自动发布' },
     { id: `visit:${w}`, t, cat: '主动互动', name: `关系池串门·${WL[w]}窗`, unit: '条', status: 'on', set: `${f(Q.visit)} 条（你拍板）`, setNum: f(Q.visit), sug: '回复类合计≤5-10/天=低风险档（XActions 回复分档；官方200/天硬顶）',
       desc: '互惠分选人→对方最新帖留言（LLM+质量门，限频7/21天，近14天真关系口径）' },
-    { id: `community:${w}`, t, cat: '社区互关', name: `互关评论·${WL[w]}窗`, unit: '条', status: 'on', set: `${f(Q.community)} 条（你拍板）`, setNum: f(Q.community), sug: '≤10/天=低风险；20-50/天=高风险档（XActions 分档；当前设定20/天落在高风险区，已如实告知）',
+    { id: `community:${w}`, t, cat: '社区互关', name: `互关评论·${WL[w]}窗`, unit: '条', status: 'on', set: `${f(Q.community)} 条（你拍板）`, setNum: f(Q.community), sug: '≤10/天=低风险；20-50/天=高风险档（XActions 分档；当前设定25/天已在高风险档（XActions 20-50），已如实告知）',
       desc: '互关话题选帖→先关注后回复（LLM 文案）' },
     { id: `follow:${w}`, t, cat: '社区互关', name: `关注帖主·${WL[w]}窗`, unit: '人', status: 'on', set: `${f(Q.follow)} 人（你拍板）`, setNum: f(Q.follow), sug: '≤30-50/天（XActions 20-150按账龄；账龄30天小号取下沿；官方400/天硬顶）',
       desc: '对评论对象过画像筛选后关注，比例>' + CFG.follow.ratioGuard.maxRatio + ' 当日停' },

@@ -200,7 +200,7 @@
   },
   "executor": {
     "rollingCaps": {
-      "reply": 30,
+      "reply": 40,
       "follow": 50,
       "like": 20,
       "unfollow": 0,
@@ -234,9 +234,9 @@
     },
     "quotas": {
       "community": {
-        "am": 7,
-        "mid": 7,
-        "pm": 6
+        "am": 9,
+        "mid": 8,
+        "pm": 8
       },
       "follow": {
         "am": 7,
@@ -251,27 +251,7 @@
       "followBack": 0
     },
     "dryRounds": 2,
-    "scanPosts": 30,
-    "quotasByAccount": {
-      "wcixot": {
-        "community": {
-          "am": 4,
-          "mid": 3,
-          "pm": 3
-        },
-        "visit": {
-          "am": 2,
-          "mid": 2,
-          "pm": 1
-        },
-        "follow": {
-          "am": 4,
-          "mid": 3,
-          "pm": 3
-        },
-        "followBack": 0
-      }
-    }
+    "scanPosts": 30
   },
   "task2": {
     "hashtags": [
@@ -281,7 +261,7 @@
       "浇朋友",
       "蓝朋友了"
     ],
-    "repliesPerDay": 20,
+    "repliesPerDay": 25,
     "keywords": [
       "互关",
       "互粉",
