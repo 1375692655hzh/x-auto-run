@@ -248,7 +248,12 @@
         "mid": 3,
         "pm": 3
       },
-      "followBack": 0
+      "followBack": 0,
+      "replyFollowBack": {
+        "am": 5,
+        "mid": 4,
+        "pm": 3
+      }
     },
     "dryRounds": 2,
     "scanPosts": 30,

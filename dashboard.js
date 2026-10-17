@@ -40,8 +40,8 @@ function windowRows(w, t) {
       desc: '互关话题选帖→先关注后回复（LLM 文案）' },
     { id: `follow:${w}`, t, cat: '社区互关', name: `关注帖主·${WL[w]}窗`, unit: '人', status: 'on', set: `${f(Q.follow)} 人（你拍板）`, setNum: f(Q.follow), sug: '≤30-50/天（XActions 20-150按账龄；账龄30天小号取下沿；官方400/天硬顶）',
       desc: '对评论对象过画像筛选后关注，比例>' + CFG.follow.ratioGuard.maxRatio + ' 当日停' },
-    { id: `followBack:${w}`, t, cat: '社区互关', name: `回关新粉·${WL[w]}窗`, unit: '人', status: 'off', set: '0（10-18 拍板取消：压低互关粉丝占比）', setNum: null, sug: '已停（XActions follow-back 本为可选增长动作；停后互关分子不再增长、粉丝分母继续涨，占比下行）',
-      desc: '粉丝列表 ' + (FB.scanCells || 40) + ' 格内真人回关' },
+    { id: `followReply:${w}`, t, cat: '社区互关', name: `条件回关·${WL[w]}窗`, unit: '人', status: 'on', set: '≤5 人/窗·≤12/天（默认值我拟——条件=对方 7 天内回复过我+关注过我）', setNum: 5, sug: '按需回真实互动者（比旧"逢粉必回"精准；XActions follow-back 50/场次上限内）',
+      desc: '通知扫描发现"回复+关注"双条件满足且未关注过的人→回关；回关后落档永不重复' },
     { id: `unfollow:${w}`, t, cat: '社区互关', name: `取关·${WL[w]}窗`, unit: '人', status: 'off', set: '0（不做，你拍板）', setNum: null, sug: '0——不建议自动化（XActions 明示强烈不建议；follow churn 属执法违规画像）',
       desc: '非互关清理能力默认关（unfollowPolicy off + 额度0 双保险）' },
   ];
@@ -99,7 +99,7 @@ function aggregateLogs() {
         const w = (String(j.id).match(/-(am|mid|pm)-/) || [])[1] || winByHour;
         let base;
         if (j.type === 'post') base = 'post';
-        else if (j.type === 'follow') base = /-fb-/.test(j.id) ? 'followBack' : 'follow';
+        else if (j.type === 'follow') base = /-fb-/.test(j.id) ? 'followBack' : /-frb-/.test(j.id) ? 'followReply' : 'follow';
         else if (j.type === 'unfollow') base = 'unfollow';
         else base = /community/.test(j.id) ? 'community' : 'visit';
         row = `${base}:${w}`;

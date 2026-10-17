@@ -23,7 +23,7 @@ const argOf = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 ? argv
 const ACCOUNT = argOf('account', 'butcher');
 const WINDOW = argOf('window', 'am');
 const MODE = argOf('mode', 'visit');
-const RQ = ((CFG.rounds || {}).quotasByAccount || {})[ACCOUNT] || (CFG.rounds || {}).quotas || {}; // 每号配额（10-18 wcixot 复刻：quotasByAccount 优先，无则用默认档）
+const RQ = Object.assign({}, (CFG.rounds || {}).quotas || {}, ((CFG.rounds || {}).quotasByAccount || {})[ACCOUNT] || {}); // 每号配额=默认档打底+每号覆盖（10-18：wcixot 有独立数字，新增默认任务自动继承）
 const ACCT = CFG.accounts.find((a) => a.key === ACCOUNT);
 if (!ACCT) { console.error('config.accounts 无此账号: ' + ACCOUNT); process.exit(1); }
 const PERSONA = (CFG.personas || {})[ACCOUNT];
@@ -284,6 +284,37 @@ async function planFollowback(ts) {
   return cands.slice(0, cap).map((h, i) => ({ id: `${today()}-${WINDOW}-fb-${i + 1}`, account: ACCOUNT, type: 'follow', kind: 'followback', targetHandle: h, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() }));
 }
 
+// ── 模式三b：条件回关（10-18 用户拍板"别人回复我+关注我→可以回关"）──
+// 数据源=关系池通知扫描的 theirEvents：7 天内同时有 (reply|mention) 事件与 follow 事件、且我方尚未关注的人才回；
+// 与旧"逢粉必回"不同：只回有真实互动的人；回关后 relation.weFollow 落档不再重复。
+async function planReplyFollowBack(ts) {
+  const contacts = readJson(path.join(STATE_DIR, `contacts-${ACCOUNT}.json`));
+  if (!contacts) { console.log('关系池未建，条件回关跳过'); return []; }
+  const inWin = loadQueue(WINDOW).filter((e) => e.kind === 'followback-reply' && e.status !== 'skipped').length;
+  const cap = Math.min(windowQuota('replyFollowBack') - inWin, 30 - countedToday('followback-reply'));
+  if (cap <= 0) { console.log('条件回关额度已满/未配置'); return []; }
+  const cut7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const queuedHandles = new Set();
+  for (const w of ['am', 'mid', 'pm']) for (const e of loadQueue(w)) if (e.kind === 'followback-reply' && e.targetHandle) queuedHandles.add(e.targetHandle.toLowerCase());
+  const out = [];
+  const baseId = loadQueue(WINDOW).length;
+  for (const e of Object.values(contacts.people || {})) {
+    if (out.length >= cap) break;
+    const h = (e.handle || '').toLowerCase();
+    if (!h || OWN.has(h) || queuedHandles.has(h)) continue;
+    if (e.relation && e.relation.weFollow) continue; // 已关注过不重复
+    const evs = (e.activity && e.activity.theirEvents) || [];
+    const recent = evs.filter((x) => x[0] >= cut7);
+    const replied = recent.some((x) => x[1] === 'reply' || x[1] === 'mention');
+    const followed = recent.some((x) => x[1] === 'follow');
+    if (!(replied && followed)) continue;
+    out.push({ id: `${today()}-${WINDOW}-frb-${baseId + out.length + 1}`, account: ACCOUNT, type: 'follow', kind: 'followback-reply', targetHandle: e.handle, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
+    console.log(`  条件回关入队: @${e.handle}（7天内 回复+关注 双条件满足）`);
+  }
+  if (!out.length) console.log('无条件回关候选（每日 09:35/09:45 通知扫描后更新候选）');
+  return out;
+}
+
 // ── 模式四：取关采集（能力 2026-10-16 建；默认策略 off，改 config.follow.unfollowPolicy 启用） ──
 // 参考：WCixot 取关自动化（非互关优先/互关保留/随机节奏）+ XActions smartUnfollow（白名单/仅清理自己关注的/宽限期）。
 // 执行侧双保险：rollingCaps.unfollow=0 时执行器直接拒（fail-closed）；执行时现场复查互关徽标，互关一律保留。
@@ -394,6 +425,7 @@ async function planPost(ts) {
   if (MODE === 'visit' || MODE === 'all') entries = entries.concat(await planVisit(ts));
   if (MODE === 'community' || MODE === 'all') entries = entries.concat(await planCommunity(ts));
   if (MODE === 'followback' || MODE === 'all') entries = entries.concat(await planFollowback(ts));
+  if (MODE === 'replyfollowback' || MODE === 'all') entries = entries.concat(await planReplyFollowBack(ts));
   if (MODE === 'unfollow' || MODE === 'all') entries = entries.concat(await planUnfollow(ts));
   if (MODE === 'post' || MODE === 'all') entries = entries.concat(await planPost(ts));
   if (entries.length) {

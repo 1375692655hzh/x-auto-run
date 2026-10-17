@@ -473,6 +473,10 @@ function executeAction(page, entry) {
 
       if (r.ok) { e.status = 'done'; e.result = SIMULATE ? 'simulated' : 'ok'; done += 1; stats.executed.push(e.id); if (e.type === 'reply') { syncContacts(e, 'reply'); recordReply(e); } if (e.type === 'follow') syncContacts(e, 'follow'); }
       else if (r.unknown) { e.status = 'unknown'; e.result = '结果不明（占额度，禁重试，待核）: ' + (r.note || ''); stats.unknown.push(e.id); }
+      // 关注幂等（10-18 条件回关）：实际已关注过的人按钮不出现，算完成不计失败（防误触连续失败熔断）
+      else if (e.type === 'follow' && /可能已关注/.test(r.note || '')) {
+        e.status = 'done'; e.result = '已关注过（幂等）'; done += 1; stats.executed.push(e.id);
+      }
       // 权重维护（v1.1 M6）：目标帖不可见/已删是目标侧原因，跳过不计失败熔断
       else if (e.kind === 'maintain' && /未找到目标帖|页面加载失败/.test(r.note || '')) {
         e.status = 'skipped'; e.result = '目标帖不可见（维护跳过）: ' + (r.note || ''); stats.skipped.push(e.id);
