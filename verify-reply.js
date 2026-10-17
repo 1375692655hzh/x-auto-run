@@ -11,7 +11,7 @@ const ROOT = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
 const STATE_DIR = path.join(ROOT, 'state');
 const API = 'https://api.fxtwitter.com';
-const HANDLE = (CFG.accounts.find((a) => a.key === 'butcher') || {}).handle || 'MarketButcher88';
+const RUN_KEYS = CFG.accounts.filter((a) => a.role === 'run').map((a) => a.key); // 10-18 双运行号：butcher+wcixot
 const argv = process.argv.slice(2);
 const WIN = ((argv.find((a) => a.startsWith('--window=')) || '').slice('--window='.length) || 'am');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }; // 本地(北京)日期——曾用 UTC 致凌晨任务写错日（10-17 互关扫描写入昨日快照，Codex 抓出）
@@ -27,9 +27,11 @@ async function getJSON(url) {
   try { return { data: await r.json() }; } catch { return { err: 'badjson' }; }
 }
 
-(async () => {
-  if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { console.error('PAUSE 生效中，退出'); return; }
-  // 1) butcher 近 4h 带回复时间线 → 本人发出的回复（author==self && replying_to）；端点偶发空响应，重试 1 次
+async function checkOne(key) {
+  const acct = CFG.accounts.find((a) => a.key === key);
+  const HANDLE = (acct || {}).handle || key; // 双号覆盖（10-18 wcixot 复刻）
+  const audit = (obj) => fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: new Date().toISOString(), task: 'verifyReply', account: key, ...obj }) + '\n');
+  // 1) 近 4h 带回复时间线 → 本人发出的回复（author==self && replying_to）；端点偶发空响应，重试 1 次
   const since = Math.floor((Date.now() - 4 * 3600000) / 1000);
   let tl = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -53,8 +55,8 @@ async function getJSON(url) {
       if (c.data && (!c.err)) { visible = true; break; }
       if (attempt === 1) await sleep(6000); // 索引落地缓冲后复测
     }
-    results.push({ id, target: r.replying_to, visible });
-    LOG(`回复 ${id.slice(-8)} → @${r.replying_to} ：${visible ? '✓ 可见' : '✗ 疑似隐藏'}`);
+    results.push({ id, target: (r.replying_to && r.replying_to.screen_name) || r.replying_to, visible });
+    LOG(`回复 ${id.slice(-8)} → @${(r.replying_to && r.replying_to.screen_name) || r.replying_to} ：${visible ? '✓ 可见' : '✗ 疑似隐藏'}`);
     await sleep(1500);
   }
   const visible = results.filter((x) => x.visible).length;
@@ -63,7 +65,7 @@ async function getJSON(url) {
   const snapPath = path.join(STATE_DIR, 'health-snapshots', `${today()}.json`);
   const snap = readJson(snapPath, { accounts: {} });
   const hist = snap.replyVisibility || [];
-  snap.replyVisibility = [...hist.filter((x) => x.window !== WIN), { window: WIN, at: new Date().toISOString(), checked: results.length, visible, results }];
+  snap.replyVisibility = [...hist.filter((x) => x.window !== WIN || x.account !== key), { account: key, window: WIN, at: new Date().toISOString(), checked: results.length, visible, results }];
   writeJson(snapPath, snap);
 
   // 4) 当日汇总：连续 2 天可见率 <50% → 触发雷达复测 flag
@@ -74,5 +76,10 @@ async function getJSON(url) {
   if (lowStreak) { writeJson(path.join(STATE_DIR, 'radar-reprobe.flag'), { handle: HANDLE, at: new Date().toISOString(), note: `回复可见率连续2天<50%（${days.map(([, v]) => v.visible + '/' + v.checked).join('、')}）` }); LOG('⚠ 可见率连续 2 天 <50%，已写雷达复测 flag'); }
 
   audit({ action: 'check', window: WIN, checked: results.length, visible, note: results.map((x) => x.id.slice(-8) + (x.visible ? '✓' : '✗')).join(' ') });
-  console.log(`本窗抽查：可见 ${visible}/${results.length}，已写入快照 replyVisibility`);
+  console.log(`[${key}] 本窗抽查：可见 ${visible}/${results.length}`);
+}
+
+(async () => {
+  if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { console.error('PAUSE 生效中，退出'); return; }
+  for (const key of RUN_KEYS) { try { await checkOne(key); } catch (e) { console.error(`[${key}] 异常: ${e.message}`); } await sleep(2000); }
 })().catch((e) => { console.error(e.message || e); process.exitCode = 1; });

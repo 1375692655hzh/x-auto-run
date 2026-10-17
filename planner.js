@@ -23,11 +23,14 @@ const argOf = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 ? argv
 const ACCOUNT = argOf('account', 'butcher');
 const WINDOW = argOf('window', 'am');
 const MODE = argOf('mode', 'visit');
+const RQ = ((CFG.rounds || {}).quotasByAccount || {})[ACCOUNT] || (CFG.rounds || {}).quotas || {}; // 每号配额（10-18 wcixot 复刻：quotasByAccount 优先，无则用默认档）
 const ACCT = CFG.accounts.find((a) => a.key === ACCOUNT);
 if (!ACCT) { console.error('config.accounts 无此账号: ' + ACCOUNT); process.exit(1); }
 const PERSONA = (CFG.personas || {})[ACCOUNT];
 if (!PERSONA) { console.error('config.personas 无此账号人设: ' + ACCOUNT); process.exit(1); }
 const PROMPTS = CFG.prompts || {};
+const PB = ((CFG.promptsByAccount || {})[ACCOUNT]) || {}; // 每号提示词覆盖（10-18 wcixot）
+const briefOf = (m) => PB[m] || PROMPTS[m];
 const OWN = new Set([ACCT.handle.toLowerCase(), (CFG.target.handle || '').toLowerCase(), ...CFG.accounts.map((a) => a.handle.toLowerCase())].filter(Boolean));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -62,8 +65,8 @@ function countedToday(kind) { // 今日各窗已排的某类条目（planned/int
   for (const w of ['am', 'mid', 'pm']) for (const e of loadQueue(w)) if (e.kind === kind && e.status !== 'skipped') n += 1;
   return n;
 }
-const dailyQuota = (kind) => (['am', 'mid', 'pm']).reduce((s, w) => s + ((R.quotas || {})[kind] || {})[w], 0) || 0;
-const windowQuota = (kind) => ((R.quotas || {})[kind] || {})[WINDOW] || 0;
+const dailyQuota = (kind) => (['am', 'mid', 'pm']).reduce((s, w) => s + (RQ[kind] || {})[w], 0) || 0;
+const windowQuota = (kind) => (RQ[kind] || {})[WINDOW] || 0;
 
 // ── FxTwitter：取对象最新一条自发非回复帖（≤72h） ──
 async function fetchLatestPost(handle) {
@@ -117,7 +120,7 @@ async function planVisit(ts) {
     const post = await fetchLatestPost(e.handle);
     if (!post) continue; // 72h 无自发新帖 → 跳过不凑数
     try {
-      const r = await generateReply({ post: post.text, author: e.handle, persona: PERSONA, brief: PROMPTS.visit, history: ts.replyHistory.slice(-8) });
+      const r = await generateReply({ post: post.text, author: e.handle, persona: PERSONA, brief: briefOf('visit'), history: ts.replyHistory.slice(-8) });
       const qc = quality.check(r.text, { history: ts.replyHistory });
       if (!qc.ok) { console.log(`  质量门未过(@${e.handle}): ${qc.reason}`); continue; }
       out.push({ id: `${today()}-${WINDOW}-visit-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'visit', postUrl: post.postUrl, statusId: post.statusId, targetHandle: e.handle, text: qc.cleaned, followFirst: false, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
@@ -226,7 +229,7 @@ async function planCommunity(ts) {
     if (out.length >= cap) break;
     if (queuedHandles.has(p.author)) continue;
     try {
-      const r = await generateReply({ post: p.text, author: p.author, persona: PERSONA, brief: PROMPTS.community, history: ts.replyHistory.slice(-8) });
+      const r = await generateReply({ post: p.text, author: p.author, persona: PERSONA, brief: briefOf('community'), history: ts.replyHistory.slice(-8) });
       const qc = quality.check(r.text, { history: ts.replyHistory });
       if (!qc.ok) { console.log(`  质量门未过(@${p.author}): ${qc.reason}`); continue; }
       out.push({ id: `${today()}-${WINDOW}-community-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'community', postUrl: 'https://x.com' + p.link, statusId: p.id, targetHandle: p.author, text: qc.cleaned, followFirst: true, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
@@ -239,7 +242,7 @@ async function planCommunity(ts) {
 
 // ── 模式三：回关采集（浏览器只读扫粉丝列表） ──
 async function planFollowback(ts) {
-  const cap = Math.min((R.quotas || {}).followBack || 10, countedToday('followback') >= 30 ? 0 : 10);
+  const cap = Math.min(windowQuota('followBack') || 0, 30); // 10-18 起回关配额同源每号表（butcher 已拍板 0）
   if (cap <= 0) { console.log('回关额度已满'); return []; }
   const hour = new Date().getHours();
   if (hour < L.activeHours[0] || hour >= L.activeHours[1]) { console.log('不在执行窗，回关扫描跳过'); return []; }
