@@ -134,10 +134,11 @@
       "smallAccountProactivePerDay": 2
     },
     "followBack": {
-      "enabled": true,
-      "perWindow": 10,
-      "perDay": 30,
-      "scanCells": 40
+      "enabled": false,
+      "perWindow": 0,
+      "perDay": 0,
+      "scanCells": 40,
+      "note": "2026-10-18 用户拍板：取消回关新粉（压低互关粉丝占比——分子停止增长，粉丝分母继续涨，占比下行）"
     },
     "unfollowTimeout": {
       "enabled": false,
@@ -238,7 +239,7 @@
         "mid": 3,
         "pm": 3
       },
-      "followBack": 10
+      "followBack": 0
     },
     "dryRounds": 2,
     "scanPosts": 30
