@@ -91,7 +91,7 @@ function enqueueAndRun(acct, entries) {
   writeJson(file, q);
   audit({ task: 'maintainWatch', action: 'enqueue', account: acct, count: entries.length, queue: path.basename(file) });
   // 保护区（统计规范 v1.1 C5/8）：三执行窗 ±30min + 09:25-09:55 关系池扫描段——区内只入队，延迟到保护区结束再拉起 executor（防账号锁/双开窗冲突）
-  const ZONES = [['09:25', '09:55'], ['10:10', '10:40'], ['15:10', '15:40'], ['20:10', '20:40']];
+  const ZONES = [['09:25', '09:55'], ['10:10', '11:00'], ['15:10', '16:00'], ['20:10', '21:00']]; // 双号执行窗（butcher 10:20/wcixot 10:30 等，会话≤25min）+09:35扫描段——10-18 错开 10min 后加宽
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const inZone = ZONES.find((z) => {
     const [a, b] = [z[0].split(':').map(Number), z[1].split(':').map(Number)];
