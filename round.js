@@ -45,9 +45,12 @@ const run = (args) => {
   } catch { console.log('健康门：当日无快照，照常执行（unknown≠异常）'); }
   const rs = loadRounds();
   const dry = rs.completed < (CFG.rounds.dryRounds || 0);
-  console.log(`执行窗 ${WINDOW} 开始（第 ${rs.completed + 1} 轮，${dry ? '演练模式：扫描/生成/队列全真，点击关闭' : '真实执行模式'}）`);
+  // 窗口模式（10-18 四窗拍板）：互关窗(8:30/13/16/20)=community+条件回关；串门发布窗(10:30/20:30)=visit+post——从 config.rounds.windows[WINDOW].modes 读取
+  const WCFG = ((CFG.rounds || {}).windows || {})[WINDOW] || {};
+  const MODES = argOf('modes', WCFG.modes || 'all');
+  console.log(`执行窗 ${WINDOW} 开始（${WCFG.time || '?'}，模式: ${MODES}，第 ${rs.completed + 1} 轮，${dry ? '演练模式' : '真实执行模式'}）`);
 
-  const okPlan = run([path.join(ROOT, 'planner.js'), '--account', ACCOUNT, '--mode', 'all', '--window', WINDOW]);
+  const okPlan = run([path.join(ROOT, 'planner.js'), '--account', ACCOUNT, '--mode', MODES, '--window', WINDOW]);
   if (!okPlan) log({ action: 'round', window: WINDOW, note: 'planner 失败' });
 
   const queueFile = path.join(ROOT, 'queue', `${today()}-${WINDOW}-${ACCOUNT}.json`);

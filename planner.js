@@ -24,6 +24,7 @@ const argOf = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 ? argv
 const ACCOUNT = argOf('account', 'butcher');
 const WINDOW = argOf('window', 'am');
 const MODE = argOf('mode', 'visit');
+const MODES = String(MODE).split(',').map((x) => x.trim()).filter(Boolean);
 const RQ = Object.assign({}, (CFG.rounds || {}).quotas || {}, ((CFG.rounds || {}).quotasByAccount || {})[ACCOUNT] || {}); // 每号配额=默认档打底+每号覆盖（10-18：wcixot 有独立数字，新增默认任务自动继承）
 const ACCT = CFG.accounts.find((a) => a.key === ACCOUNT);
 if (!ACCT) { console.error('config.accounts 无此账号: ' + ACCOUNT); process.exit(1); }
@@ -423,12 +424,12 @@ async function planPost(ts) {
   if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { console.error('state/PAUSE 急停生效中，planner 退出'); process.exit(0); }
   const ts = loadTaskstate();
   let entries = [];
-  if (MODE === 'visit' || MODE === 'all') entries = entries.concat(await planVisit(ts));
-  if (MODE === 'community' || MODE === 'all') entries = entries.concat(await planCommunity(ts));
-  if (MODE === 'followback' || MODE === 'all') entries = entries.concat(await planFollowback(ts));
-  if (MODE === 'replyfollowback' || MODE === 'all') entries = entries.concat(await planReplyFollowBack(ts));
-  if (MODE === 'unfollow' || MODE === 'all') entries = entries.concat(await planUnfollow(ts));
-  if (MODE === 'post' || MODE === 'all') entries = entries.concat(await planPost(ts));
+  if (MODES.includes('visit') || MODES.includes('all')) entries = entries.concat(await planVisit(ts));
+  if (MODES.includes('community') || MODES.includes('all')) entries = entries.concat(await planCommunity(ts));
+  if (MODES.includes('followback') || MODES.includes('all')) entries = entries.concat(await planFollowback(ts));
+  if (MODES.includes('replyfollowback') || MODES.includes('all')) entries = entries.concat(await planReplyFollowBack(ts));
+  if (MODES.includes('unfollow') || MODES.includes('all')) entries = entries.concat(await planUnfollow(ts));
+  if (MODES.includes('post') || MODES.includes('all')) entries = entries.concat(await planPost(ts));
   if (entries.length) {
     const q = loadQueue(WINDOW).concat(entries);
     saveQueue(WINDOW, q);

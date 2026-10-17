@@ -228,10 +228,30 @@
   },
   "rounds": {
     "windows": {
-      "am": "08:30",
-      "mid": "13:00",
-      "pm": "16:00",
-      "eve": "20:00"
+      "am": {
+        "time": "08:30",
+        "modes": "community,replyfollowback"
+      },
+      "mid": {
+        "time": "13:00",
+        "modes": "community,replyfollowback"
+      },
+      "pm": {
+        "time": "16:00",
+        "modes": "community,replyfollowback"
+      },
+      "eve": {
+        "time": "20:00",
+        "modes": "community,replyfollowback"
+      },
+      "vam": {
+        "time": "10:30",
+        "modes": "visit,post"
+      },
+      "vpm": {
+        "time": "20:30",
+        "modes": "visit,post"
+      }
     },
     "quotas": {
       "community": {
@@ -240,24 +260,16 @@
         "pm": 6,
         "eve": 6
       },
-      "follow": {
+      "visit": {
+        "vam": 5,
+        "vpm": 5
+      },
+      "followBack": 0,
+      "replyFollowBack": {
         "am": 5,
         "mid": 5,
         "pm": 5,
         "eve": 5
-      },
-      "visit": {
-        "am": 3,
-        "mid": 3,
-        "pm": 2,
-        "eve": 2
-      },
-      "followBack": 0,
-      "replyFollowBack": {
-        "am": 3,
-        "mid": 3,
-        "pm": 3,
-        "eve": 3
       }
     },
     "dryRounds": 2,
@@ -271,16 +283,8 @@
           "eve": 5
         },
         "visit": {
-          "am": 3,
-          "mid": 3,
-          "pm": 2,
-          "eve": 2
-        },
-        "follow": {
-          "am": 5,
-          "mid": 5,
-          "pm": 5,
-          "eve": 5
+          "vam": 5,
+          "vpm": 5
         },
         "followBack": 0
       }
@@ -427,10 +431,8 @@
     "budget": {
       "perDay": 2,
       "windowAllocation": {
-        "am": 1,
-        "mid": 0,
-        "pm": 0,
-        "eve": 1
+        "vam": 1,
+        "vpm": 1
       },
       "note": "Gentle 起步档（XActions 2/天；X算法：隔窗发布每帖独占2h黄金窗防稀释）。2026-10-18 用户拍板'按推荐执行'。升级到 Normal(5/天) 需量化条件触发呈报+人工拍板：14天零限流+雷达绿+账龄≥30天+丢弃量佐证；周末投递 10-18 用户拍板放开（云端已 7x24）"
     },
@@ -438,10 +440,8 @@
       "wcixot": {
         "perDay": 2,
         "windowAllocation": {
-          "am": 1,
-          "mid": 0,
-          "pm": 0,
-          "eve": 1
+          "vam": 1,
+          "vpm": 1
         },
         "note": "同 butcher Gentle 档（10-18 接入拍板）"
       }
