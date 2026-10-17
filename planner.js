@@ -16,6 +16,7 @@ const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
 const STATE_DIR = path.join(ROOT, 'state');
 const QUEUE_DIR = path.join(ROOT, 'queue');
 const R = CFG.rounds || {};
+const WINS = Object.keys((CFG.rounds || {}).windows || { am: 1, mid: 1, pm: 1 }); // 窗位列表配置驱动（10-18 起四窗 8:30/13:00/16:00/20:00）
 const L = CFG.limits;
 
 const argv = process.argv.slice(2);
@@ -62,10 +63,10 @@ function loadQueue(win) { const q = readJson(queuePath(win)); return Array.isArr
 function saveQueue(win, q) { fs.mkdirSync(QUEUE_DIR, { recursive: true }); fs.writeFileSync(queuePath(win), JSON.stringify(q, null, 2)); }
 function countedToday(kind) { // 今日各窗已排的某类条目（planned/intent/done/unknown 均计，skipped 不计）
   let n = 0;
-  for (const w of ['am', 'mid', 'pm']) for (const e of loadQueue(w)) if (e.kind === kind && e.status !== 'skipped') n += 1;
+  for (const w of WINS) for (const e of loadQueue(w)) if (e.kind === kind && e.status !== 'skipped') n += 1;
   return n;
 }
-const dailyQuota = (kind) => (['am', 'mid', 'pm']).reduce((s, w) => s + (RQ[kind] || {})[w], 0) || 0;
+const dailyQuota = (kind) => WINS.reduce((s, w) => s + (RQ[kind] || {})[w], 0) || 0;
 const windowQuota = (kind) => (RQ[kind] || {})[WINDOW] || 0;
 
 // ── FxTwitter：取对象最新一条自发非回复帖（≤72h） ──
@@ -93,7 +94,7 @@ async function planVisit(ts) {
   if (cap <= 0) { console.log('串门额度已满'); return []; }
   // 今日已入队对象（含其他窗）不重复选
   const queuedHandles = new Set();
-  for (const w of ['am', 'mid', 'pm']) for (const e of loadQueue(w)) if (e.status !== 'skipped' && e.targetHandle) queuedHandles.add(e.targetHandle);
+  for (const w of WINS) for (const e of loadQueue(w)) if (e.status !== 'skipped' && e.targetHandle) queuedHandles.add(e.targetHandle);
   const baseId = loadQueue(WINDOW).length; // 补跑时 ID 续编，避免重复
   // 14天真关系门槛（2026-10-16 用户拍板：只计近2周与本号的真实互动；Owen圈候选默认不用于串门）
   const cutoff14 = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
@@ -223,7 +224,7 @@ async function planCommunity(ts) {
   } finally { await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { }); }
   const baseId = loadQueue(WINDOW).length; // 补跑时 ID 续编，避免重复
   const queuedHandles = new Set();
-  for (const w of ['am', 'mid', 'pm']) for (const e of loadQueue(w)) if (e.status !== 'skipped' && e.targetHandle) queuedHandles.add(e.targetHandle);
+  for (const w of WINS) for (const e of loadQueue(w)) if (e.status !== 'skipped' && e.targetHandle) queuedHandles.add(e.targetHandle);
   const out = [];
   for (const p of cands) {
     if (out.length >= cap) break;
@@ -295,7 +296,7 @@ async function planReplyFollowBack(ts) {
   if (cap <= 0) { console.log('条件回关额度已满/未配置'); return []; }
   const cut7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
   const queuedHandles = new Set();
-  for (const w of ['am', 'mid', 'pm']) for (const e of loadQueue(w)) if (e.kind === 'followback-reply' && e.targetHandle) queuedHandles.add(e.targetHandle.toLowerCase());
+  for (const w of WINS) for (const e of loadQueue(w)) if (e.kind === 'followback-reply' && e.targetHandle) queuedHandles.add(e.targetHandle.toLowerCase());
   const out = [];
   const baseId = loadQueue(WINDOW).length;
   for (const e of Object.values(contacts.people || {})) {
@@ -400,7 +401,7 @@ async function planPost(ts) {
   if (!texts.length) { console.log('posts-inbox/ 无待发内容'); return []; }
   // 去重：今日各窗队列 + 已发历史
   const seen = new Set(ts.replyHistory);
-  for (const w of ['am', 'mid', 'pm']) for (const e of loadQueue(w)) if (e.text) seen.add(e.text);
+  for (const w of WINS) for (const e of loadQueue(w)) if (e.text) seen.add(e.text);
   const baseId = loadQueue(WINDOW).length;
   const out = [];
   for (const t of texts) {

@@ -27,7 +27,7 @@ const FB = CFG.follow.followBack, UF = CFG.follow.unfollowTimeout;
 // 任务时间线（2026-10-16 重构）：按一天时间排序；多时间节点拆独立行（早/午/晚窗各自成行）。
 // 伪控制面板原则：set=设定量【只显示你实际拍板/config 里真实存在的值，没有就是"未设定"】；
 //                sug=建议量【引擎/参考档位】；status=当前开关状态（对话即控制）。
-const WL = { am: '早', mid: '午', pm: '晚' };
+const WL = { am: '早', mid: '午', pm: '下', eve: '晚' }; // 四窗 8:30/13:00/16:00/20:00（10-18 拍板）
 const Q = ((CFG.rounds || {}).quotas) || {};
 function windowRows(w, t) {
   const f = (m) => ((m || {})[w] != null ? m[w] : null);
@@ -53,9 +53,10 @@ const TASK_ROWS = [
   { id: 'scan', t: '09:35', cat: '系统运维', name: '关系池扫描', unit: '次', status: 'on', set: '1 次/8屏', setNum: 1, sug: '1/天（只读零风险；同日重复扫描无增量收益——通知已去重）', desc: '只读扫通知页喂关系池' },
   { id: 'owen', t: '10:00', cat: '主动互动', name: 'Owen帖加持（外部任务）', unit: '帖', status: 'paused', set: '2 帖（旧拍板）', setNum: 2, sug: '≤2/天（外部任务维持旧档；X算法：直接导航不计推荐权重，仅关系维护价值）', desc: '外部 boost.js 任务：满45分钟新帖四连——**已退役**（10-17，接替者=权重维护互动行；ZCode 旧轮 10-18 已删除）' },
   { id: 'graph', t: '10:00', cat: '主动互动', name: '图谱点赞（外部任务）', unit: '赞', status: 'paused', set: '2 赞/轮（旧拍板）', setNum: null, sug: '点赞类合计≤20/天（XActions 50-100/天档，我们取约1/3更保守）', desc: '@' + (G0.handle || '?') + ' + @antiAIvo 随机点赞（只赞不评）——已随 boost.js 退役（10-17），能力未迁移，复活需拍板' },
-  ...windowRows('am', '10:20'),
-  ...windowRows('mid', '15:20'),
-  ...windowRows('pm', '20:20'),
+  ...windowRows('am', '08:30'),
+  ...windowRows('mid', '13:00'),
+  ...windowRows('pm', '16:00'),
+  ...windowRows('eve', '20:00'),
   { id: 'maintain', t: '随帖', cat: '主动互动', name: '权重维护互动', unit: '次', status: 'on', set: '≤2 帖/目标 · 1 号/帖 · ≤3 次/号（v1.1 拍板）', setNum: null, sug: '维护动作计入当日点赞(≤20)/回复总帽（XActions 分档同前；从被维护账号角度=黄金窗内分散信号）', desc: '侦测器白天每25分钟盯 butcher/Owen 新帖：45min~3h 黄金窗挑帖点赞（butcher 对 Owen 另有≤1条/2天回复）；自然互动占比>1/3 跳过；幽灵/降权熔断' },
   { id: 'verifyReply', t: '随窗(+40分)', cat: '系统运维', name: '回复可见性抽查', unit: '次', status: 'on', set: '每窗后 1 次 ×1-2 条（v1.1）', setNum: 1, sug: '事件触发 3 次/天（零暴露直测回复隐藏风险；与雷达交叉验证）', desc: '10:55/16:00/21:00 匿名核验刚发回复外部可见性；连续2天<50%自动触发雷达复测' },
   { id: 'passive', t: '随通知', cat: '被动回复', name: '回复他人的回复', unit: '', status: 'pending', set: '不限（你拍板）', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '别人在我们帖下的回复→回应；评论模块待接入' },
@@ -81,7 +82,7 @@ function aggregateLogs() {
       const hhmm = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
       let row = null, item = null;
       const hour0 = t.getHours();
-      const winByHour = hour0 < 14 ? 'am' : hour0 < 18 ? 'mid' : 'pm'; // 旧系统无窗字段，按时段归属
+      const winByHour = hour0 < 11 ? 'am' : hour0 < 15 ? 'mid' : hour0 < 18 ? 'pm' : 'eve'; // 旧系统无窗字段，按时段归属（四窗 8:30/13/16/20）
       if (j.task === 'graph' && j.action === 'like') { row = 'graph'; item = `@${j.target} 帖${String(j.post).slice(-4)}`; }
       else if (j.task === 1) { row = 'owen'; item = `帖${String(j.post).slice(-4)} ${(j.actions || []).join('+')}`; }
       else if (j.task === 2) { row = `community:${winByHour}`; item = `@${j.author}「${String(j.text || '').slice(0, 18)}」`; }
@@ -96,7 +97,7 @@ function aggregateLogs() {
         row = 'maintain'; item = `${j.target ? (String(j.target).startsWith('@') ? j.target : '@' + j.target) : j.statusId} ${j.type === 'reply' ? '维护回复' : '维护点赞'}`;
       }
       else if (j.task === 'executor' && j.action === 'execute' && (j.status === 'done' || j.status === 'unknown')) {
-        const w = (String(j.id).match(/-(am|mid|pm)-/) || [])[1] || winByHour;
+        const w = (String(j.id).match(/-(am|mid|pm|eve)-/) || [])[1] || winByHour;
         let base;
         if (j.type === 'post') base = 'post';
         else if (j.type === 'follow') base = /-fb-/.test(j.id) ? 'followBack' : /-frb-/.test(j.id) ? 'followReply' : 'follow';

@@ -228,31 +228,36 @@
   },
   "rounds": {
     "windows": {
-      "am": "10:20",
-      "mid": "15:20",
-      "pm": "20:20"
+      "am": "08:30",
+      "mid": "13:00",
+      "pm": "16:00",
+      "eve": "20:00"
     },
     "quotas": {
       "community": {
-        "am": 9,
-        "mid": 8,
-        "pm": 8
+        "am": 7,
+        "mid": 6,
+        "pm": 6,
+        "eve": 6
       },
       "follow": {
-        "am": 7,
-        "mid": 7,
-        "pm": 6
+        "am": 5,
+        "mid": 5,
+        "pm": 5,
+        "eve": 5
       },
       "visit": {
-        "am": 4,
+        "am": 3,
         "mid": 3,
-        "pm": 3
+        "pm": 2,
+        "eve": 2
       },
       "followBack": 0,
       "replyFollowBack": {
-        "am": 5,
-        "mid": 4,
-        "pm": 3
+        "am": 3,
+        "mid": 3,
+        "pm": 3,
+        "eve": 3
       }
     },
     "dryRounds": 2,
@@ -260,19 +265,22 @@
     "quotasByAccount": {
       "wcixot": {
         "community": {
-          "am": 7,
-          "mid": 7,
-          "pm": 6
+          "am": 5,
+          "mid": 5,
+          "pm": 5,
+          "eve": 5
         },
         "visit": {
-          "am": 4,
+          "am": 3,
           "mid": 3,
-          "pm": 3
+          "pm": 2,
+          "eve": 2
         },
         "follow": {
-          "am": 7,
-          "mid": 7,
-          "pm": 6
+          "am": 5,
+          "mid": 5,
+          "pm": 5,
+          "eve": 5
         },
         "followBack": 0
       }
@@ -421,7 +429,8 @@
       "windowAllocation": {
         "am": 1,
         "mid": 0,
-        "pm": 1
+        "pm": 0,
+        "eve": 1
       },
       "note": "Gentle 起步档（XActions 2/天；X算法：隔窗发布每帖独占2h黄金窗防稀释）。2026-10-18 用户拍板'按推荐执行'。升级到 Normal(5/天) 需量化条件触发呈报+人工拍板：14天零限流+雷达绿+账龄≥30天+丢弃量佐证；周末投递 10-18 用户拍板放开（云端已 7x24）"
     },
@@ -431,7 +440,8 @@
         "windowAllocation": {
           "am": 1,
           "mid": 0,
-          "pm": 1
+          "pm": 0,
+          "eve": 1
         },
         "note": "同 butcher Gentle 档（10-18 接入拍板）"
       }
