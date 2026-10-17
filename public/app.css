@@ -1,0 +1,86 @@
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", system-ui, sans-serif; background: #eef1f5; color: #1c2733; font-size: 14px; }
+  .app { display: flex; min-height: 100vh; }
+  .side { width: 200px; background: #10202e; color: #cfe0ee; padding: 18px 12px; flex-shrink: 0; }
+  .side h1 { font-size: 15px; color: #fff; margin-bottom: 3px; }
+  .side .sub { font-size: 11px; color: #7d95a8; margin-bottom: 16px; }
+  .acct-btn { display: block; width: 100%; text-align: left; background: transparent; border: none; color: #cfe0ee; padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 8px; font-size: 14px; }
+  .acct-btn .nm { display: inline-block; max-width: 128px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; } /* 账号名称（X 昵称）过长省略 */
+  .acct-btn:hover { background: #1b3247; }
+  .acct-btn.on { background: #24557a; color: #fff; }
+  .acct-btn .h { font-size: 11px; color: #8fa9bd; margin-top: 2px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .dot.g { background: #35c46f; } .dot.u { background: #b9bec4; } .dot.r { background: #e5484d; }
+  .main { flex: 1; padding: 16px 26px; min-width: 0; } /* 不设 max-width：内容随窗口铺满，右侧不留白 */
+  .topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .tabs button { border: none; background: #dfe6ed; padding: 7px 24px; font-size: 14px; border-radius: 8px 8px 0 0; cursor: pointer; color: #51606e; }
+  .tabs button.on { background: #fff; color: #111; font-weight: 700; }
+  .meta { font-size: 12px; color: #8a97a3; margin-left: auto; }
+  .card { background: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(16,32,46,.07); }
+  .card h3 { font-size: 13px; color: #51606e; font-weight: 700; margin-bottom: 10px; }
+  .card h3 .src { font-weight: 400; font-size: 11px; color: #98a5b1; margin-left: 8px; }
+  .row1 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }   /* 左右各占一半 */
+  .grid6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .metric { border: 1px solid #e4eaf0; border-radius: 9px; padding: 9px 11px; }
+  .metric .label { font-size: 12px; color: #6b7885; }
+  .metric .val { font-size: 21px; font-weight: 800; margin: 1px 0; }
+  .metric .delta { font-size: 11.5px; }
+  /* 红涨绿跌（2026-10-16 用户拍板） */
+  .up { color: #d64545; } .down { color: #1f9d55; } .flat { color: #98a5b1; }
+  .ratio-v { color: #1f9d55; }
+  .dims { display: flex; flex-direction: column; gap: 7px; }
+  .dim { border: 1px solid #e4eaf0; border-radius: 8px; padding: 8px 11px; display: flex; align-items: center; gap: 10px; }
+  .dim .icon { font-size: 15px; width: 20px; text-align: center; }
+  .dim .name { font-size: 13px; font-weight: 700; width: 96px; }
+  .dim .st { font-size: 11.5px; color: #6b7885; flex: 1; }
+  .ok-t { color: #1f9d55; } .unk-t { color: #98a5b1; } .wait-t { color: #c2761b; }
+  .charts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .pool2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border-bottom: 1px solid #edf1f5; padding: 6px 8px; font-size: 12.5px; text-align: center; }
+  th { color: #6b7885; font-weight: 600; background: #f7fafc; }
+  td.l { text-align: left; }
+  .badge { display: inline-block; font-size: 10px; border-radius: 4px; padding: 1px 6px; margin-left: 5px; }
+  .badge.new { background: #e3f0fb; color: #2563a8; font-weight: 700; }
+  .tasktable th, .tasktable td { border: 1px solid #e2e8ee; padding: 8px 8px; font-size: 12.5px; text-align: center; vertical-align: middle; }
+  .tasktable { table-layout: fixed; }
+  td.cat { font-weight: 800; font-size: 12.5px; color: #24557a; background: #f4f8fc; }
+  .t-name { font-weight: 700; font-size: 13px; }
+  .cat-tag { display: inline-block; font-size: 10px; border-radius: 4px; padding: 1px 6px; background: #eef3f8; color: #24557a; margin-right: 4px; vertical-align: 1px; }
+  .t-desc { font-size: 11.5px; color: #6b7885; line-height: 1.4; }
+  .tgt .set { font-size: 12.5px; color: #6d5a1e; font-weight: 700; display: block; }
+  .tgt .sug { font-size: 11px; color: #98a5b1; line-height: 1.5; }
+  .tgt .sug .sug-head { color: #4a5866; }
+  .tgt .sug .sugv { font-weight: 800; font-size: 12.5px; color: #1d6fb8; }
+  .tgt .sug .sug-rest { color: #98a5b1; }
+  .cell-n { font-weight: 700; font-size: 13px; }
+  .cell-n .frac { color: #98a5b1; font-weight: 400; font-size: 11px; }
+  .cell-t { color: #6d7c8a; font-size: 10.5px; display: block; margin-top: 1px; }
+  td.dimc { color: #c3ccd4; }
+  /* 整行底色只看任务状态（2026-10-16 用户设计）：能运行=白底；暂停/停用/待接入/未投递=灰底 */
+  tr.row-on td { background: #ffffff; }
+  tr.row-off td { background: #eceff3; }
+  /* 已完成格=全站唯一一种绿，优先级高于行底色：无论行是白是灰，做了就是同一个绿，无深浅差 */
+  td.fillc, tr.row-on td.fillc, tr.row-off td.fillc { background: #ddf3e4; }
+  tr.row-off .t-name { color: #5c6a76; }
+  tr.row-off .cat-tag { background: #dfe3e9; color: #6b7885; }
+  tr.row-off .t-desc, tr.row-off .set, tr.row-off .sug, tr.row-off .ttime { color: #97a3ae; }
+  tr.row-off .sug .sugv { color: #6a94b8; }
+  .unk { color: #c2761b; font-size: 11px; }
+  .foot-note { font-size: 11px; color: #98a5b1; margin-top: 8px; }
+  .qrow { display: flex; flex-wrap: wrap; gap: 10px; }
+  .linkchip { font-size: 9.5px; background: #33506a; color: #d8e8f5; border-radius: 4px; padding: 1px 5px; vertical-align: 1px; font-weight: 600; }
+  .qchip { flex: 1 1 138px; min-width: 128px; max-width: 190px; border: 1px solid #e2e8ee; border-radius: 9px; padding: 8px 10px 9px; background: #fbfcfe; }
+  .qchip.qchip-off { background: #f1f3f6; }
+  .qtop { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .qlabel { font-size: 12px; font-weight: 700; color: #2c3a47; }
+  .qnum { font-size: 14px; font-weight: 800; color: #1f6e43; }
+  .qsep { color: #98a5b1; font-weight: 400; padding: 0 1px; }
+  .qunit { font-size: 10.5px; color: #8a97a3; font-weight: 400; margin-left: 2px; }
+  .qbar { position: relative; height: 13px; border-radius: 7px; background: #e8edf3; overflow: hidden; }
+  .qbar i { position: absolute; left: 0; top: 0; bottom: 0; background: #4a9e6f; border-radius: 7px; }
+  .qbar .qpct { position: absolute; right: 6px; top: 0; font-size: 9.5px; line-height: 13px; color: #4a5b68; }
+  .qbar-none { background: #f1f3f6; text-align: center; }
+  .qbar-none .qnone { font-size: 9.5px; line-height: 13px; color: #a7b2bd; }
+  .btn-refresh { border: 1px solid #c8d4de; background: #fff; border-radius: 7px; padding: 5px 14px; cursor: pointer; font-size: 13px; }
