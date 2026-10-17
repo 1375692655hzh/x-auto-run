@@ -45,7 +45,7 @@ function enqueuedToday(local) {
 
 (async () => {
   const BUDGET = (CFG.posts && CFG.posts.budget) || { perDay: 2, windowAllocation: { am: 1, mid: 0, pm: 1 } };
-  const isWeekend = [0, 6].includes(new Date(Date.now() + 8 * 3600000).getUTCDay());
+  const isWeekend = [0, 6].includes(new Date(Date.now() + 8 * 3600000).getUTCDay()) && !(CFG.posts || {}).weekendPublish; // 10-18 用户拍板放开周末投递（weekendPublish=true）
   const roleOf = (k) => (CFG.accounts.find((a) => a.key === k) || {}).role;
   let keyFailed = false;
 
