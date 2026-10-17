@@ -38,6 +38,7 @@ const QUEUE_FILE = argOf('queue', null);
 const WINDOW = argOf('window', null);
 const MAX_ACTIONS = parseInt(argOf('max-actions', '99'), 10);
 const DRY = argv.includes('--dry');
+const ENTRY_ID = argOf('entry', null); // 定时发布（10-18）：--entry <id> 只执行该条目（round 到点逐条拉起用）
 const SIMULATE = process.env.EXECUTOR_SIMULATE === '1';
 const CRASH_HOOK = process.env.EXECUTOR_CRASH_AFTER_INTENT === '1';
 
@@ -409,7 +410,8 @@ function executeAction(page, entry) {
     process.exit(0);
   }
 
-  acquireLock();
+  let locked = false;
+  for (let attempt = 1; attempt <= 8; attempt++) { try { acquireLock(); locked = true; break; } catch (le) { if (attempt === 8) throw le; console.log(`[锁等待] ${le.message}，75 秒后重试(${attempt}/8)`); await sleep(75000); } } // 10-18：定时单条与执行窗可能撞锁，等待让路而非放弃
   if (reconciled) { saveQueue(queue); log({ action: 'reconcile', unknown: reconciled }); }
   const deadline = Date.now() + X.sessionMaxMinutes * 60000;
   let done = 0, fails = 0, browser = null, ws = null;
@@ -427,6 +429,7 @@ function executeAction(page, entry) {
     for (const e of queue) {
       if (sessionAborted || Date.now() > deadline || done >= MAX_ACTIONS) break;
       if (e.status !== 'planned') continue;
+      if (ENTRY_ID && e.id !== ENTRY_ID) continue; // 单条模式：跳过其他条目
       if (WINDOW && e.window && e.window !== WINDOW) continue;
       const ageMin = (Date.now() - Date.parse(e.createdAt)) / 60000;
       if (ageMin > (e.ttlMin || X.queueTtlMinutes)) { e.status = 'skipped'; e.result = 'TTL 过期'; stats.skipped.push(e.id); continue; }
@@ -442,11 +445,11 @@ function executeAction(page, entry) {
         e.text = qc.cleaned;
       }
       if (capLeftRolling(e.type) <= 0) { e.status = 'skipped'; e.result = `滚动24h额度不足(${e.type})`; stats.skipped.push(e.id); continue; }
-      // 原创帖间隔闸（三方方案 P4，X 算法：每帖 2h 黄金窗）：距上一条原创帖尝试 <2h 跳过
+      // 定时发布（10-18 拍板）：postAt 未到的帖在普通会话里跳过（由 round 到点用 --entry 单独拉起）；间隔保护=相邻帖 ≥60 秒
       if (e.type === 'post') {
+        if (e.postAt && !ENTRY_ID && Date.parse(e.postAt) > Date.now() + 30000) { continue; } // 未到点：本轮会话不碰（状态保持 planned）
         const lastPost = Math.max(0, ...((LEDGER.actions.post || []).filter(Number.isFinite)));
-        if (lastPost && Date.now() - lastPost < 2 * 3600000) { e.status = 'skipped'; e.result = `距上一条原创帖不足 2h（${Math.round((Date.now() - lastPost) / 60000)}min）`; stats.skipped.push(e.id); continue; }
-        if (e.jitterSec) await sleep(e.jitterSec * 1000); // 窗内随机偏移防整点指纹
+        if (lastPost && Date.now() - lastPost < 60 * 1000) { e.status = 'skipped'; e.result = `距上一条原创帖不足 60 秒`; stats.skipped.push(e.id); continue; }
       }
 
       // exactly-once：发送前落盘 intent

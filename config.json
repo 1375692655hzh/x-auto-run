@@ -204,7 +204,7 @@
       "follow": 50,
       "like": 20,
       "unfollow": 0,
-      "post": 10
+      "post": 20
     },
     "queueTtlMinutes": 300,
     "actionGapGaussMs": [
@@ -432,29 +432,51 @@
     }
   },
   "posts": {
-    "perWindow": 2,
-    "perDay": 10,
+    "perWindow": 7,
+    "perDay": 18,
     "budget": {
-      "perDay": 2,
+      "perDay": 18,
       "windowAllocation": {
-        "p1": 1,
-        "p2": 0,
-        "p3": 1
+        "p1": {
+          "min": 2,
+          "max": 5
+        },
+        "p2": {
+          "min": 3,
+          "max": 6
+        },
+        "p3": {
+          "min": 3,
+          "max": 7
+        }
       },
-      "note": "Gentle 起步档（XActions 2/天；X算法：隔窗发布每帖独占2h黄金窗防稀释）。2026-10-18 用户拍板'按推荐执行'。升级到 Normal(5/天) 需量化条件触发呈报+人工拍板：14天零限流+雷达绿+账龄≥30天+丢弃量佐证；周末投递 10-18 用户拍板放开（云端已 7x24）"
+      "note": "2026-10-18 用户拍板：早2~5/午3~6/晚3~7（日8~18随机），帖间隔1~10min随机，逐条定时发布（入队带 postAt，到点单独拉起）"
     },
     "budgetByAccount": {
       "wcixot": {
-        "perDay": 2,
+        "perDay": 18,
         "windowAllocation": {
-          "p1": 1,
-          "p2": 0,
-          "p3": 1
+          "p1": {
+            "min": 2,
+            "max": 5
+          },
+          "p2": {
+            "min": 3,
+            "max": 6
+          },
+          "p3": {
+            "min": 3,
+            "max": 7
+          }
         },
         "note": "同 butcher Gentle 档（10-18 接入拍板）"
       }
     },
-    "weekendPublish": true
+    "weekendPublish": true,
+    "gapMin": [
+      1,
+      10
+    ]
   },
   "promptsByAccount": {
     "wcixot": {

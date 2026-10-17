@@ -64,10 +64,27 @@ const run = (args, opts = {}) => {
     if (!dry) { rs.completed += 1; saveRounds(rs); }
     return;
   }
+
+  // 定时发布（10-18 拍板）：post 条目带 postAt 精确时刻（间隔 1~10min 随机）——到点逐条单独拉起 executor --entry
+  // 普通会话只跑非 post 条目（串门等）；post 未到点由 executor 自动跳过，这里再逐条设到点定时器
+  const queue = JSON.parse(fs.readFileSync(queueFile, 'utf8'));
+  const posts = (Array.isArray(queue) ? queue : []).filter((e) => e && e.type === 'post' && e.status === 'planned' && e.postAt);
+  if (posts.length && !dry) {
+    for (const p of posts) {
+      const delay = Math.max(0, Date.parse(p.postAt) - Date.now());
+      console.log(`[定时发布] ${p.id} → ${new Date(p.postAt).toLocaleTimeString('zh-CN')}（${Math.round(delay / 60000)} 分钟后）`);
+      setTimeout(() => {
+        console.log(`\n===== 定时发布 ${p.id} =====`);
+        const r = spawnSync(process.execPath, [path.join(ROOT, 'executor.js'), '--account', ACCOUNT, '--queue', queueFile, '--entry', p.id], { cwd: ROOT, stdio: 'inherit' });
+        log({ action: 'scheduledPost', window: WINDOW, id: p.id, ok: r.status === 0 });
+      }, delay);
+    }
+  }
+
   const execArgs = [path.join(ROOT, 'executor.js'), '--account', ACCOUNT, '--queue', queueFile, '--window', WINDOW];
   if (dry) execArgs.push('--dry');
   const okExec = run(execArgs);
-  log({ action: 'round', window: WINDOW, dry, plannerOk: okPlan, executorOk: okExec });
+  log({ action: 'round', window: WINDOW, dry, plannerOk: okPlan, executorOk: okExec, scheduledPosts: posts.length });
   if (okExec) { rs.completed += 1; saveRounds(rs); }
-  console.log(`执行窗 ${WINDOW} 结束（${dry ? '演练' : '真实'}）`);
+  console.log(`执行窗 ${WINDOW} 结束（${dry ? '演练' : '真实'}${posts.length ? `；${posts.length} 条定时帖待发（进程驻留到点拉起）` : ''}）`);
 })().catch((e) => { console.error(e); process.exit(1); });

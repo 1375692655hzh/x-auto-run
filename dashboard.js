@@ -45,8 +45,8 @@ function windowRows(w, t) { // 互关窗行（10-18 拍板：四窗 8:30/13:00/1
 function vpRows(w, t) { // 串门+发布窗行（10:30/20:30，独立于互关四窗）
   const f = (m) => ((m || {})[w] != null ? m[w] : null);
   return [
-    { id: `post:${w}`, t, cat: '原创发布', name: `原创发布·${WL[w]}档`, unit: '帖', status: 'wait-feed', set: `${((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[w] ?? 0} 帖（拍板 Gentle ${((CFG.posts || {}).budget || {}).perDay || 2} 条/天）`, setNum: ((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[w] ?? null, sug: '1-2/天起步→≤5/天（XActions Gentle2~Normal5；官方50/天硬顶；X算法：每帖2h黄金窗，多发互相稀释）',
-      desc: '发布窗 09:35/12:35/19:35 与云端生成完成时刻对齐：窗内先拉取（p1 发 9 点档/p2 发 12 点档/p3 发 18 点档）→滴灌→即发' },
+    { id: `post:${w}`, t, cat: '原创发布', name: `原创发布·${WL[w]}档`, unit: '帖', status: 'wait-feed', set: (() => { const a = ((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[w]; const fmt = (x) => (x != null && typeof x === 'object' ? `${x.min}~${x.max}` : String(x ?? 0)); return `${fmt(a)} 帖（你拍板区间·间隔1~10min定时发布）`; })(), setNum: null, sug: '区间随机 8~18/天（你拍板 10-18；随机量有防指纹价值；官方50/天硬顶；引擎帽20/天）',
+      desc: '发布窗 09:35/12:35/19:35 与云端生成完成对齐：窗内拉取→滴灌（区间随机条数）→每条帖带精确 postAt（1~10min 间隔）到点单独发布' },
     { id: `visit:${w}`, t, cat: '主动互动', name: `关系池串门·${WL[w]}档`, unit: '条', status: 'on', set: `${f(Q.visit)} 条（你拍板）`, setNum: f(Q.visit), sug: '回复类合计≤5-10/天=低风险档（XActions 回复分档；官方200/天硬顶）',
       desc: '互惠分选人→对方最新帖留言（LLM+质量门，限频7/21天，近14天真关系口径）' },
   ];
@@ -304,7 +304,7 @@ function buildData() {
       { label: '关注帖主', unit: '人', done: sumWin('follow'), planned: planWin(Q.follow), plannedText: String(planWin(Q.follow)), note: '三窗合计（你拍板 20/天）' },
       { label: '回关新粉', unit: '人', done: sumWin('followBack'), planned: FB.perDay, plannedText: String(FB.perDay), note: '10/窗 ×3 封顶（你的 10/小时 落地）' },
       { label: '关系串门', unit: '条', done: sumWin('visit'), planned: planWin(Q.visit), plannedText: String(planWin(Q.visit)), note: '三窗合计 4+3+3（你拍板）' },
-      { label: '原创发布', unit: '帖', done: sumWin('post'), planned: null, plannedText: '未设定', note: '你尚未拍板发布量；引擎帽 ≤10/天·2/窗' },
+      { label: '原创发布', unit: '帖', done: sumWin('post'), planned: null, plannedText: '8~18/天（区间随机）', note: '10-18 你拍板：早2~5/午3~6/晚3~7，帖间隔1~10min定时发布；引擎帽 20/天' },
       { label: '点赞', unit: '赞', done: (g1.graph || {}).count || 0, planned: ((CFG.dailyCaps || {}).likes != null ? CFG.dailyCaps.likes : null), plannedText: '≤' + ((CFG.dailyCaps || {}).likes ?? 20) + ' 引擎帽', note: '图谱点赞已退役（10-17）；引擎滚动帽 20/天' },
       { label: '取关', unit: '人', done: sumWin('unfollow'), planned: 0, plannedText: '0（不做）', note: '你拍板不做（unfollowPolicy off + 滚动帽 0 双保险）' },
     ];
@@ -623,7 +623,7 @@ function renderTask(a) {
       + '<td class="tgt"><span class="set">' + (() => {
         // 发布行例外（10-18 wcixot 接入）：有内容源发布预算的账号（run 号或 budgetByAccount 号）显示自己的拍板值，其余照旧"—"
         const pm = /^post:(\\w+)$/.exec(row.id); // 注意：模板字符串内正则转义必须双反斜杠（10-16 已立规矩，10-18 又踩一次）
-        if (pm && DATA.postsBudget && DATA.postsBudget[CUR]) { const pb = DATA.postsBudget[CUR]; return ((pb.windowAllocation || {})[pm[1]] ?? 0) + ' 帖（拍板 Gentle ' + (pb.perDay || 2) + ' 条/天）'; }
+        if (pm && DATA.postsBudget && DATA.postsBudget[CUR]) { const pb = DATA.postsBudget[CUR]; const ax = (pb.windowAllocation || {})[pm[1]]; const fx = (x) => (x != null && typeof x === 'object' ? x.min + '~' + x.max : String(x ?? 0)); return fx(ax) + ' 帖（你拍板区间·1~10min定时）'; }
         return a.isRun ? esc(row.set) : '—';
       })() + '</span></td>'
       + '<td class="tgt"><span class="sug">' + sugFmt(row.sug) + '</span></td>';

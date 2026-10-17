@@ -405,14 +405,22 @@ async function planPost(ts) {
   for (const w of WINS) for (const e of loadQueue(w)) if (e.text) seen.add(e.text);
   const baseId = loadQueue(WINDOW).length;
   const out = [];
+  // 定时发布（10-18 用户拍板）：每条帖带 postAt 精确时刻=窗起点+累计随机间隔(1~10min/条)，由 round 到点逐条单独拉起
+  const GAP = (CFG.posts || {}).gapMin || [1, 10];
+  const wTime = (((CFG.rounds || {}).windows || {})[WINDOW] || {}).time || '09:35';
+  let cumMin = 0;
   for (const t of texts) {
     if (out.length >= cap - inWindow) break;
     if (!t || !t.text || seen.has(t.text)) { console.log('  跳过（空/重复）:', String(t.text).slice(0, 24)); continue; }
     const wl = quality.weightedLen(t.text);
     if (wl > 280) { console.log(`  跳过（超长 ${wl}>280）:`, t.text.slice(0, 24)); continue; }
     seen.add(t.text); // C2 修复：选中即入去重集（同批相同文本不再二次入队）
-    out.push({ id: `${today()}-${WINDOW}-post-${baseId + out.length + 1}`, account: ACCOUNT, type: 'post', kind: 'post', text: t.text, quote: t.quote || undefined, quoteUrl: t.quoteUrl || undefined, window: WINDOW, jitterSec: 60 + Math.floor(Math.random() * 120), status: 'planned', createdAt: new Date().toISOString() }); // jitterSec：发帖窗内 60-180s 随机偏移防整点指纹（三方方案 P4）
-    console.log(`  发布入队（${wl}字重${t.quote ? '·引用帖' : ''}）: ${t.text.slice(0, 32)}…`);
+    if (out.length > 0) cumMin += GAP[0] + Math.random() * (GAP[1] - GAP[0]); // 第 1 条=窗起点即发，其后累计 1~10min 随机
+    const [wh, wm] = String(wTime).split(':').map(Number);
+    const bj = new Date(Date.now() + 8 * 3600000); // 北京日期分量
+    const postAtMs = Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate(), wh - 8, wm) + cumMin * 60000 + Math.floor(Math.random() * 50) * 1000; // 北京墙钟 wh:wm +累计间隔 +秒级随机
+    out.push({ id: `${today()}-${WINDOW}-post-${baseId + out.length + 1}`, account: ACCOUNT, type: 'post', kind: 'post', text: t.text, quote: t.quote || undefined, quoteUrl: t.quoteUrl || undefined, window: WINDOW, postAt: new Date(postAtMs).toISOString(), status: 'planned', createdAt: new Date().toISOString() });
+    console.log(`  发布入队（${wl}字重${t.quote ? '·引用帖' : ''}·定时 ${String(wTime)}+${cumMin.toFixed(0)}min）: ${t.text.slice(0, 32)}…`);
   }
   // 消费投递文件（改名留审计；后缀去掉 .json 防重扫=C1 双保险；未入队的超额内容保留在 .done 里不丢）
   for (const f of usedFiles) { try { fs.renameSync(path.join(POSTS_INBOX, f), path.join(POSTS_INBOX, f + '.done-' + Date.now())); } catch { } }
