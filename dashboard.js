@@ -234,11 +234,14 @@ function buildData() {
         : { icon: '◐', cls: 'unk-t', name: '回复可见', st: '今日暂无抽查（窗后 +40 分钟自动核验）' },
     ];
     const series = HDAYS_ARR.map((d) => ({ d, v: hist[d] && hist[d].profile ? hist[d].profile.followers : null })).filter((x) => x.v != null);
-    // 限流雷达（shadowbanradar 渲染通道）：当日快照里的 radar 字段为准
+    // 限流雷达（shadowbanradar 渲染通道）：当日快照优先，缺则回溯最近含 radar 的快照（10-18 修复：09:10 前打开不再退化"自建通道"）
     let radar = null;
-    const rsnap = readJson(path.join(STATE_DIR, 'health-snapshots', `${TODAY}.json`));
-    if (rsnap && rsnap.radar && rsnap.radar.results && rsnap.radar.results[a.handle]) {
-      radar = { fetchedAt: rsnap.radar.fetchedAt, url: rsnap.radar.results[a.handle].url, four: rsnap.radar.results[a.handle].four };
+    for (const rd of [TODAY, ...[1, 2].map((n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10))]) {
+      const rsnap = readJson(path.join(STATE_DIR, 'health-snapshots', `${rd}.json`));
+      if (rsnap && rsnap.radar && rsnap.radar.results && rsnap.radar.results[a.handle] && rsnap.radar.results[a.handle].four) {
+        radar = { fetchedAt: rsnap.radar.fetchedAt, date: rd, url: rsnap.radar.results[a.handle].url, four: rsnap.radar.results[a.handle].four };
+        break;
+      }
     }
     // 关系池
     const contacts = readJson(path.join(STATE_DIR, `contacts-${a.key}.json`));
@@ -296,16 +299,18 @@ function buildData() {
     }
     // 今日额度（2026-10-16 用户要求恢复在任务页顶部）：单向任务完成总量/规划当天总量
     // 完成量=当日真实动作审计（aggregateLogs 已滤 dry/simulated）；规划量=你拍板的日总量（没拍板=未设定/引擎帽）
+    // 10-18 三方评审修复：①全窗化（原只算 am/mid/pm，漏互关晚窗+发布三窗）②条件任务改事件计数不画目标量 ③点赞计入维护互动
     const g1 = (agg[a.key] || {})[TODAY] || {};
-    const sumWin = (p) => ['am', 'mid', 'pm'].reduce((n, w) => n + ((g1[`${p}:${w}`] || {}).count || 0), 0);
-    const planWin = (m) => ['am', 'mid', 'pm'].reduce((n, w) => n + (m && m[w] != null ? m[w] : 0), 0);
+    const WKEYS = Object.keys((CFG.rounds || {}).windows || { am: 1, mid: 1, pm: 1 });
+    const sumWin = (p) => WKEYS.reduce((n, w) => n + ((g1[`${p}:${w}`] || {}).count || 0), 0);
+    const planWin = (m) => WKEYS.reduce((n, w) => n + (m && typeof m[w] === 'number' ? m[w] : 0), 0);
     const quotas = [
-      { label: '互关评论', unit: '条', done: sumWin('community'), planned: planWin(Q.community), plannedText: String(planWin(Q.community)), note: '三窗合计 7+7+6（你拍板）' },
-      { label: '关注帖主', unit: '人', done: sumWin('follow'), planned: planWin(Q.follow), plannedText: String(planWin(Q.follow)), note: '三窗合计（你拍板 20/天）' },
-      { label: '回关新粉', unit: '人', done: sumWin('followBack'), planned: FB.perDay, plannedText: String(FB.perDay), note: '10/窗 ×3 封顶（你的 10/小时 落地）' },
-      { label: '关系串门', unit: '条', done: sumWin('visit'), planned: planWin(Q.visit), plannedText: String(planWin(Q.visit)), note: '三窗合计 4+3+3（你拍板）' },
+      { label: '互关评论', unit: '条', done: sumWin('community'), planned: planWin(Q.community), plannedText: String(planWin(Q.community)), note: '四窗合计（你拍板' + planWin(Q.community) + '/天）' },
+      { label: '关注帖主', unit: '人', done: sumWin('follow'), planned: null, plannedText: '随互关 1:1', note: '条件行事：每条互关评论自动先关注（非按量任务，无目标量）' },
+      { label: '条件回关', unit: '人', done: sumWin('followReply'), planned: null, plannedText: '条件行事（上限20/天）', note: '回复+关注双条件满足即回，候选 0 不做' },
+      { label: '关系串门', unit: '条', done: sumWin('visit'), planned: planWin(Q.visit), plannedText: String(planWin(Q.visit)), note: '三发布窗合计（你拍板' + planWin(Q.visit) + '/天）' },
       { label: '原创发布', unit: '帖', done: sumWin('post'), planned: null, plannedText: '8~18/天（区间随机）', note: '10-18 你拍板：早2~5/午3~6/晚3~7，帖间隔1~10min定时发布；引擎帽 20/天' },
-      { label: '点赞', unit: '赞', done: (g1.graph || {}).count || 0, planned: ((CFG.dailyCaps || {}).likes != null ? CFG.dailyCaps.likes : null), plannedText: '≤' + ((CFG.dailyCaps || {}).likes ?? 20) + ' 引擎帽', note: '图谱点赞已退役（10-17）；引擎滚动帽 20/天' },
+      { label: '点赞', unit: '赞', done: ((g1.graph || {}).count || 0) + ((g1.maintain || {}).count || 0), planned: ((CFG.executor && CFG.executor.rollingCaps || {}).like != null ? CFG.executor.rollingCaps.like : null), plannedText: '≤' + (((CFG.executor || {}).rollingCaps || {}).like ?? 20) + ' 引擎帽', note: '含权重维护互动点赞（10-18 修复：原只数已退役图谱行）' },
       { label: '取关', unit: '人', done: sumWin('unfollow'), planned: 0, plannedText: '0（不做）', note: '你拍板不做（unfollowPolicy off + 滚动帽 0 双保险）' },
     ];
     return {
@@ -450,6 +455,7 @@ const PAGE = `<!DOCTYPE html>
       </div>
       <button class="btn-refresh" onclick="load()">刷新</button>
       <div class="meta" id="meta"></div>
+      <div id="conn-warn" style="display:none;background:#fdecea;color:#c0392b;padding:6px 12px;border-radius:6px;margin:6px 0;font-size:13px"></div>
     </div>
     <div id="view-data"></div>
     <div id="view-task" style="display:none"></div>
@@ -653,7 +659,11 @@ function load() {
   fetch('/api/data').then(function (r) { return r.json(); }).then(function (j) {
     DATA = j;
     if (!CUR && j.accounts.length) CUR = j.accounts[0].key;
+    document.getElementById('conn-warn') && (document.getElementById('conn-warn').style.display = 'none');
     render();
+  }).catch(function (e) { // 10-18 修复：断流不再静默保持旧渲染（曾是最危险的误判源）
+    var w = document.getElementById('conn-warn');
+    if (w) { w.style.display = 'block'; w.textContent = '⚠ 数据获取失败——页面显示的是 ' + (DATA ? '上次成功获取的数据' : '空') + '，将自动重试'; }
   });
 }
 load();
