@@ -8,7 +8,7 @@ const ROOT = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
 const STATE_DIR = path.join(ROOT, 'state');
 const X = Object.assign({ rollingCaps: { reply: 8, follow: 18, like: 15, unfollow: 5 } }, CFG.executor || {});
-const GRID_DAYS = 2, DATA_DAYS = 7;
+const GRID_DAYS = 7, DATA_DAYS = 7; // 10-18 三方方案④：任务表 2→7 天格
 
 const argv = process.argv.slice(2);
 const argOf = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 ? argv[i + 1] : d; };
@@ -331,6 +331,18 @@ function buildData() {
   const taskRows = TASK_ROWS.map((r) => /^post:/.test(r.id) && inboxHas ? { ...r, status: 'ready-feed' } : r);
   const postsBudget = Object.assign({ butcher: (CFG.posts || {}).budget }, (CFG.posts || {}).budgetByAccount || {});
 
+  // 7 日完成趋势（10-18 ④）：日总量=当日各号审计动作数；完成率分母=各号有 planned 的任务之和
+  const trend = HDAYS_ARR.map((d) => {
+    let done = 0, planned = 0;
+    for (const a of accounts) {
+      const g = (agg[a.key] || {})[d] || {};
+      for (const cell of Object.values(g)) { if (typeof cell === 'object' && cell) done += cell.count || 0; }
+      for (const q of a.quotas) if (q.planned > 0) planned += q.planned;
+    }
+    return { d, done, planned };
+  });
+  const weekSummary = { actions: trend.reduce((s2, x) => s2 + x.done, 0), reportsGenerated: HDAYS_ARR.filter((d) => reports[d]).length, days: HDAYS_ARR.length };
+
   // ══ 总览层（10-18 三方方案 ③）：系统状态/急停/双号卡/异常/节奏/帖队列/动作流 ══
   const pause = fs.existsSync(path.join(STATE_DIR, 'PAUSE'));
 
@@ -405,7 +417,7 @@ function buildData() {
   alerts.sort((x, y) => x.level.localeCompare(y.level));
 
   return { generatedAt: new Date().toISOString(), days: DAYS_ARR, hdays: HDAYS_ARR, taskRows, reports, accounts, postsBudget,
-    overview: { pause, heartbeatAt, nextWindow, windowsList, postsQueue, actionStream, alerts } };
+    overview: { pause, heartbeatAt, nextWindow, windowsList, postsQueue, actionStream, alerts, trend, weekSummary } };
 }
 function normalizeGrid(g) {
   const out = {};

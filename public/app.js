@@ -127,6 +127,23 @@ function renderOverview() {
     h += '</table></div>';
   }
 
+  // 7 日完成趋势（④）+ 周汇总
+  if (ov.trend && ov.trend.length) {
+    h += '<div class="card"><h3>近 7 日完成趋势<span style="font-weight:400;font-size:11px;color:#98a5b1">（完成量柱 · 完成率行 · 口径：条件任务不计分母）</span></h3>';
+    h += '<div style="display:flex;gap:3px;align-items:flex-end;height:50px;margin:8px 0">';
+    var maxD = Math.max.apply(null, ov.trend.map(function(x){return x.done;})) || 1;
+    for (var t = 0; t < ov.trend.length; t++) {
+      var tr = ov.trend[t];
+      var bh = Math.round((tr.done / maxD) * 44) + 3;
+      h += '<div style="flex:1;text-align:center"><div style="background:#4a9e6f;height:' + bh + 'px;border-radius:2px" title="' + tr.d + ' 完成' + tr.done + '"></div><div style="font-size:9px;color:#8a97a3;margin-top:2px">' + tr.d.slice(5) + '</div></div>';
+    }
+    h += '</div>';
+    var totalDone = 0, totalPlan = 0;
+    for (var t2 = 0; t2 < ov.trend.length; t2++) { totalDone += ov.trend[t2].done; totalPlan += ov.trend[t2].planned; }
+    h += '<div style="font-size:13px;color:#51606e">周汇总：真实动作 <b>' + totalDone + '</b> 件 · 完成率 <b>' + (totalPlan > 0 ? Math.round(totalDone / totalPlan * 100) : 0) + '%</b> · 日报 ' + (ov.weekSummary ? ov.weekSummary.reportsGenerated : '?') + '/' + (ov.weekSummary ? ov.weekSummary.days : 7) + '</div>';
+    h += '</div>';
+  }
+
   // title 前缀
   var alertCount = ov.alerts.filter(function(x) { return x.level === 'P0' || x.level === 'P1'; }).length;
   document.title = (ov.pause ? '[急停]' : alertCount ? '[' + alertCount + '项异常]' : '') + ' X 运营监控';
