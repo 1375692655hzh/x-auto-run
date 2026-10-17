@@ -216,7 +216,7 @@ async function planCommunity(ts) {
       cands = cands.filter((p) => { if (seen.has(p.author)) return false; seen.add(p.author); return true; });
       cands = cands.sort(() => Math.random() - 0.5).slice(0, cap + 3); // 多备 3 个给质量门淘汰
       console.log(`话题 #${tag} 扫描 ${posts.length} 条 → 候选 ${cands.length} 条（本轮配额 ${cap}）`);
-    } finally { await browser.disconnect(); }
+    } finally { try { await page.close(); } catch { } await browser.disconnect(); } // 10-18 修复：先关页面再断开（漏关页面会随 BitBrowser 会话恢复累积）
   } finally { await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { }); }
   const baseId = loadQueue(WINDOW).length; // 补跑时 ID 续编，避免重复
   const queuedHandles = new Set();
@@ -276,7 +276,7 @@ async function planFollowback(ts) {
         cands.push(info.handle);
       }
       console.log(`粉丝列表扫描 ${cells.length} 格 → 回关候选 ${cands.length}（本轮 ${cap}）`);
-    } finally { await browser.disconnect(); }
+    } finally { try { await page.close(); } catch { } await browser.disconnect(); } // 10-18 修复：先关页面再断开（漏关页面会随 BitBrowser 会话恢复累积）
   } finally { await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { }); }
   return cands.slice(0, cap).map((h, i) => ({ id: `${today()}-${WINDOW}-fb-${i + 1}`, account: ACCOUNT, type: 'follow', kind: 'followback', targetHandle: h, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() }));
 }
@@ -325,7 +325,7 @@ async function planUnfollow(ts) {
         if (cands.length >= (UP.perRun || 0) + 5) break; // 多备几个给现场复查淘汰
       }
       console.log(`关注列表扫描 ${cells.length} 格 → 取关候选 ${cands.length}（模式 ${UP.mode}，本轮 ${UP.perRun}）`);
-    } finally { await browser.disconnect(); }
+    } finally { try { await page.close(); } catch { } await browser.disconnect(); } // 10-18 修复：先关页面再断开（漏关页面会随 BitBrowser 会话恢复累积）
   } finally { await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { }); }
   const baseId = loadQueue(WINDOW).length;
   return cands.slice(0, UP.perRun).map((h, i) => ({ id: `${today()}-${WINDOW}-unfollow-${baseId + i + 1}`, account: ACCOUNT, type: 'unfollow', kind: 'unfollow', targetHandle: h, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() }));

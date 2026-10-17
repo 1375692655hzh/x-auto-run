@@ -270,7 +270,8 @@ const ownTag = (h) => OWN.has(h) ? ' ←自家号' : '';
       if (newFaces.length) console.log('\n本次新入榜（此前未记录，今日互动≥2次）: ' + newFaces.map((x) => '@' + x).join(', '));
       if (out.stopped) console.log('注意: ' + out.stopped);
     } finally {
-      await browser.disconnect();
+      try { await page.close(); } catch { }
+      await browser.disconnect(); // 10-18 修复：先关页面
     }
   } catch (e) {
     console.error('[insights] 出错: ' + e.message);
