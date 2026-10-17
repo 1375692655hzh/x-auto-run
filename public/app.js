@@ -3,8 +3,10 @@ var DATA = null, CUR = null;
 function vDot(v) { return v === 'green' ? 'g' : v === 'suspended' ? 'r' : 'u'; }
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function switchTab(t) {
+  document.getElementById('tab-overview').className = t === 'overview' ? 'on' : '';
   document.getElementById('tab-data').className = t === 'data' ? 'on' : '';
   document.getElementById('tab-task').className = t === 'task' ? 'on' : '';
+  document.getElementById('view-overview').style.display = t === 'overview' ? '' : 'none';
   document.getElementById('view-data').style.display = t === 'data' ? '' : 'none';
   document.getElementById('view-task').style.display = t === 'task' ? '' : 'none';
 }
@@ -18,9 +20,118 @@ function render() {
       + '<div class="h">@' + esc(a.handle) + (a.metrics[0].val != null ? ' · ' + a.metrics[0].val + '粉' : '') + '</div></button>';
   }
   document.getElementById('accts').innerHTML = side;
-  document.getElementById('meta').textContent = '数据截至 ' + (cur().asOf || '—') + ' · 生成 ' + new Date(DATA.generatedAt).toLocaleTimeString('zh-CN') + ' · 60s 自动刷新';
+  document.getElementById('meta').textContent = '生成 ' + new Date(DATA.generatedAt).toLocaleTimeString('zh-CN') + ' · 60s 自动刷新';
+  document.getElementById('view-overview').innerHTML = renderOverview();
   document.getElementById('view-data').innerHTML = renderData(cur());
   document.getElementById('view-task').innerHTML = renderTask(cur());
+}
+
+// ── 总览层（10-18 三方方案 ③）────────────────────────────
+function renderOverview() {
+  if (!DATA.overview) return '<div class="card">总览数据未就绪</div>';
+  var ov = DATA.overview;
+  var runAccounts = DATA.accounts.filter(function(a) { return a.isRun; });
+  var otherAccounts = DATA.accounts.filter(function(a) { return !a.isRun; });
+  var h = '';
+
+  // A'. 急停横幅
+  if (ov.pause) h += '<div style="background:#c0392b;color:#fff;padding:10px 16px;border-radius:8px;margin-bottom:12px;font-size:15px;font-weight:700">⏸ 急停生效中（state/PAUSE）——全部任务已停止 · 删除 PAUSE 文件恢复</div>';
+
+  // A. 系统状态条
+  var hb = ov.heartbeatAt ? new Date(Date.parse(ov.heartbeatAt) + 8 * 3600000).toISOString().slice(11, 16) : '—';
+  var nw = ov.nextWindow ? ov.nextWindow.time + ' ' + ov.nextWindow.key + '（' + ov.nextWindow.modes + '）' : '今天窗口已全部结束';
+  h += '<div class="card" style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;background:' + (ov.pause ? '#fdecea' : '#eef7f1') + '">';
+  h += '<div style="font-size:15px;font-weight:700;color:' + (ov.pause ? '#c0392b' : '#1f6e43') + '">' + (ov.pause ? '■ 急停中' : '● 系统运行中') + '</div>';
+  h += '<div style="font-size:13px;color:#51606e">上一动作 ' + hb + ' · 下一窗口 <b>' + esc(nw) + '</b></div>';
+  h += '</div>';
+
+  // C. 异常收件箱（无异常显式"✓ 无"）
+  h += '<div class="card" style="padding:10px 16px;' + (ov.alerts.length ? 'border-left:4px solid #e5484d' : '') + '">';
+  h += '<div style="font-weight:700;font-size:14px;margin-bottom:6px">需要关注（' + ov.alerts.length + '）</div>';
+  if (!ov.alerts.length) h += '<div style="font-size:13px;color:#1f6e43">✓ 无异常 · 全部正常</div>';
+  else for (var i = 0; i < ov.alerts.length; i++) {
+    var al = ov.alerts[i];
+    h += '<div style="font-size:13px;padding:3px 0;color:' + (al.level === 'P0' ? '#c0392b' : al.level === 'P1' ? '#c2761b' : '#51606e') + '">' + (al.level === 'P0' ? '🔴' : al.level === 'P1' ? '🟡' : '🔵') + ' ' + esc(al.text) + '</div>';
+  }
+  h += '</div>';
+
+  // B. 双号并排卡
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+  for (var j = 0; j < runAccounts.length; j++) {
+    var a = runAccounts[j];
+    var radarScore = a.radar && a.radar.four ? (a.radar.four.score || '?') : '?';
+    var radarBad = a.radar && a.radar.four ? ['ghost','deboost','search','suggestion'].filter(function(k){ return a.radar.four[k] && !/未见/.test(a.radar.four[k]); }).length : 0;
+    var hbc = '✓正常'; if (a.verdict === 'suspended') hbc = '✕封禁'; else if (radarBad > 0) hbc = '◐受限';
+    var postsDone = 0, communityDone = 0, visitDone = 0, totalActions = 0;
+    for (var k = 0; k < a.quotas.length; k++) {
+      totalActions += a.quotas[k].done || 0;
+      if (a.quotas[k].label === '原创发布') postsDone = a.quotas[k].done;
+      if (a.quotas[k].label === '互关评论') communityDone = a.quotas[k].done;
+      if (a.quotas[k].label === '关系串门') visitDone = a.quotas[k].done;
+    }
+    var nextPost = ov.postsQueue.filter(function(p) { return p.account === a.key && p.status === 'planned' && Date.parse(p.postAt) > Date.now(); })[0];
+    h += '<div class="card" style="padding:12px 16px">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><b style="font-size:15px">' + esc(a.name) + '</b><span style="font-size:12px;color:' + (hbc === '✓正常' ? '#1f6e43' : hbc === '✕封禁' ? '#c0392b' : '#c2761b') + '">' + hbc + ' · 雷达' + radarScore + '</span></div>';
+    h += '<div style="font-size:12px;color:#6b7885;margin-bottom:8px">@' + esc(a.handle) + ' · 今日真实动作 ' + totalActions + ' 件</div>';
+    h += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+    h += '<span style="background:#eef3f8;padding:3px 8px;border-radius:5px;font-size:12px">发帖 ' + postsDone + '</span>';
+    h += '<span style="background:#eef3f8;padding:3px 8px;border-radius:5px;font-size:12px">互关评 ' + communityDone + '</span>';
+    h += '<span style="background:#eef3f8;padding:3px 8px;border-radius:5px;font-size:12px">串门 ' + visitDone + '</span>';
+    if (nextPost) h += '<span style="background:#fff3e0;padding:3px 8px;border-radius:5px;font-size:12px">⏱下一帖 ' + new Date(Date.parse(nextPost.postAt) + 8 * 3600000).toISOString().slice(11, 16) + '</span>';
+    h += '</div></div>';
+  }
+  h += '</div>';
+
+  // D. 今日节奏条
+  h += '<div class="card" style="padding:10px 16px"><div style="font-weight:700;font-size:14px;margin-bottom:8px">今日节奏</div><div style="display:flex;gap:4px;flex-wrap:wrap">';
+  var bjNowMin = new Date(Date.now() + 8 * 3600000).toISOString().slice(11, 16);
+  for (var w = 0; w < ov.windowsList.length; w++) {
+    var win = ov.windowsList[w];
+    var isPast = win.time < bjNowMin;
+    var isNext = ov.nextWindow && win.time === ov.nextWindow.time;
+    h += '<span style="padding:4px 8px;border-radius:5px;font-size:12px;' + (isPast ? 'background:#e2f4e8;color:#1f6e43' : isNext ? 'background:#fff3cd;color:#856404;font-weight:700' : 'background:#f1f3f6;color:#8a97a3') + '">' + (isPast ? '✓' : isNext ? '◉' : '○') + ' ' + win.time + ' ' + win.key + '</span>';
+  }
+  h += '</div></div>';
+
+  // F. 接入号胶囊
+  if (otherAccounts.length) {
+    h += '<div class="card" style="padding:8px 16px"><div style="font-size:12px;color:#8a97a3;margin-bottom:6px">接入号（不执行任务）</div><div style="display:flex;gap:8px;flex-wrap:wrap">';
+    for (var o = 0; o < otherAccounts.length; o++) {
+      var oa = otherAccounts[o];
+      h += '<span style="background:#f1f3f6;padding:3px 10px;border-radius:12px;font-size:12px">' + esc(oa.name) + ' · ' + (oa.metrics[0].val != null ? oa.metrics[0].val + '粉' : '?') + ' · 雷达' + (oa.radar && oa.radar.four ? oa.radar.four.score || '?' : '?') + '</span>';
+    }
+    h += '</div></div>';
+  }
+
+  // 动作流 15 条
+  h += '<div class="card"><h3>今日动作流（实时）</h3>';
+  if (!ov.actionStream.length) h += '<div style="font-size:13px;color:#8a97a3;padding:8px 0">今日尚无真实动作</div>';
+  else {
+    h += '<table style="width:100%;font-size:13px"><tr style="color:#8a97a3;font-size:11px"><td style="width:60px">时间</td><td style="width:70px">账号</td><td style="width:60px">动作</td><td>对象</td><td style="width:30px">结果</td></tr>';
+    for (var s = 0; s < ov.actionStream.length; s++) {
+      var as2 = ov.actionStream[s];
+      h += '<tr><td>' + as2.at + '</td><td>' + esc(as2.account) + '</td><td>' + esc(as2.action) + '</td><td>' + esc(as2.target) + '</td><td>' + as2.status + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  h += '</div>';
+
+  // 定时帖队列
+  if (ov.postsQueue.length) {
+    h += '<div class="card"><h3>定时帖队列</h3><table style="width:100%;font-size:13px"><tr style="color:#8a97a3;font-size:11px"><td style="width:60px">时刻</td><td style="width:70px">账号</td><td>内容</td><td style="width:50px">状态</td></tr>';
+    for (var p = 0; p < ov.postsQueue.length; p++) {
+      var pq = ov.postsQueue[p];
+      var pst = pq.status === 'done' ? '✓ 已发' : pq.status === 'unknown' ? '? 不明' : pq.status === 'skipped' ? '跳过' : Date.parse(pq.postAt) > Date.now() ? '⏱ 待发' : '⚠ 过点';
+      h += '<tr><td>' + (pq.postAt || '').slice(11, 16) + '</td><td>' + esc(pq.account) + '</td><td>' + esc(pq.text) + (pq.quote ? ' <b style="color:#1d6fb8">[引用]</b>' : '') + '</td><td>' + pst + '</td></tr>';
+    }
+    h += '</table></div>';
+  }
+
+  // title 前缀
+  var alertCount = ov.alerts.filter(function(x) { return x.level === 'P0' || x.level === 'P1'; }).length;
+  document.title = (ov.pause ? '[急停]' : alertCount ? '[' + alertCount + '项异常]' : '') + ' X 运营监控';
+
+  return h;
 }
 function cur() { for (var k = 0; k < DATA.accounts.length; k++) if (DATA.accounts[k].key === CUR) return DATA.accounts[k]; return DATA.accounts[0]; }
 

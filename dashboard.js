@@ -330,7 +330,82 @@ function buildData() {
   try { inboxHas = fs.readdirSync(path.join(ROOT, 'posts-inbox')).some((f) => (f.endsWith('.json') || f.endsWith('.txt')) && !f.includes('.done')); } catch { }
   const taskRows = TASK_ROWS.map((r) => /^post:/.test(r.id) && inboxHas ? { ...r, status: 'ready-feed' } : r);
   const postsBudget = Object.assign({ butcher: (CFG.posts || {}).budget }, (CFG.posts || {}).budgetByAccount || {});
-  return { generatedAt: new Date().toISOString(), days: DAYS_ARR, hdays: HDAYS_ARR, taskRows, reports, accounts, postsBudget };
+
+  // ══ 总览层（10-18 三方方案 ③）：系统状态/急停/双号卡/异常/节奏/帖队列/动作流 ══
+  const pause = fs.existsSync(path.join(STATE_DIR, 'PAUSE'));
+
+  // 心跳：今日最后一条日志时刻（调度静默判定依据）
+  let heartbeatAt = null;
+  try {
+    const lines = fs.readFileSync(path.join(STATE_DIR, `log-${TODAY.slice(0, 7)}.jsonl`), 'utf8').trim().split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) { try { const j = JSON.parse(lines[i]); if (j.at && j.at.startsWith(TODAY)) { heartbeatAt = j.at; break; } } catch { } }
+  } catch { }
+
+  // 下一窗口（从 config rounds.windows 算，今天还没到的最早一个）
+  const bjNow = Date.now() + 8 * 3600000;
+  const bjHm = new Date(bjNow).toISOString().slice(11, 16);
+  const windowsList = Object.entries((CFG.rounds || {}).windows || {}).map(([k, v]) => ({ key: k, time: typeof v === 'object' ? v.time : v, modes: typeof v === 'object' ? v.modes : 'all' })).sort((x, y) => x.time < y.time ? -1 : 1);
+  const nextWindow = windowsList.find((w) => w.time > bjHm) || null;
+
+  // 定时帖队列（今日队列文件里 type=post 的条目，与审计对账已发/不明）
+  const postsQueue = [];
+  try {
+    for (const f of fs.readdirSync(path.join(ROOT, 'queue')).filter((f) => f.startsWith(TODAY) && f.endsWith('.json') && f.includes('-p'))) {
+      try {
+        const q = JSON.parse(fs.readFileSync(path.join(ROOT, 'queue', f), 'utf8'));
+        if (!Array.isArray(q)) continue;
+        for (const e of q) if (e && e.type === 'post' && e.postAt) {
+          postsQueue.push({ account: e.account, window: e.window, postAt: e.postAt, status: e.status, text: String(e.text || '').slice(0, 40), quote: !!e.quote });
+        }
+      } catch { }
+    }
+  } catch { }
+  postsQueue.sort((x, y) => x.postAt < y.postAt ? -1 : 1);
+
+  // 今日动作流（最新 15 条真实动作，跨号）
+  const actionStream = [];
+  try {
+    const lines = fs.readFileSync(path.join(STATE_DIR, `log-${TODAY.slice(0, 7)}.jsonl`), 'utf8').trim().split('\n');
+    for (let i = lines.length - 1; i >= 0 && actionStream.length < 15; i--) {
+      try {
+        const j = JSON.parse(lines[i]);
+        if (!j.at || !j.at.startsWith(TODAY) || j.dry || j.simulated) continue;
+        if (j.task === 'round' || j.task === 'planner' || j.task === 'radar' || j.task === 'contacts' || j.task === 'contentPull' || j.task === 'maintainWatch') continue;
+        if (j.task === 'executor' && j.action === 'execute') {
+          actionStream.push({ at: j.at.slice(11, 19), account: j.account, action: j.type === 'post' ? (j.note && j.note.includes('引用') ? '引用帖' : '发帖') : j.type === 'reply' ? '回复' : j.type === 'follow' ? '关注' : j.type === 'like' ? '点赞' : j.type, target: j.target ? (String(j.target).startsWith('@') ? j.target : '@' + j.target) : '', status: j.status === 'done' ? '✓' : j.status === 'unknown' ? '?' : j.status === 'skipped' ? '跳' : '✗' });
+        }
+      } catch { }
+    }
+  } catch { }
+
+  // 异常收件箱（8 规则，服务端算好客户端只渲染）
+  const alerts = [];
+  if (pause) alerts.push({ level: 'P0', text: '⏸ 急停生效中（state/PAUSE）——全部任务已停' });
+  for (const a of accounts) {
+    if (a.verdict === 'suspended') alerts.push({ level: 'P0', text: `${a.name} 账号状态：suspended（封禁/冻结）` });
+    if (a.radar && a.radar.four) {
+      const bad = ['ghost', 'deboost', 'search', 'suggestion'].filter((k) => a.radar.four[k] && !/未见/.test(a.radar.four[k]));
+      if (bad.length) alerts.push({ level: a.isRun ? 'P1' : 'P2', text: `${a.name} 雷达${bad.map((k) => ({ ghost: '幽灵', deboost: '降权', search: '搜索', suggestion: '建议' }[k])).join('+')}受限（${((a.radar.four.score) || '?')}/100，截至 ${(a.radar.date || '').slice(5)}）` });
+    }
+    const uq = (normalizeGrid(agg[a.key] || {})[TODAY] || {});
+    let unkCount = 0; for (const [k, v] of Object.entries(uq)) if (typeof v === 'object' && v.unknown) unkCount += v.unknown;
+    if (unkCount > 0) alerts.push({ level: 'P0', text: `${a.name} 今日 ${unkCount} 条执行结果不明（unknown 待核）` });
+    // 额度将满
+    for (const q of a.quotas) if (q.planned > 0 && q.done >= q.planned * 0.9 && q.done < q.planned) alerts.push({ level: 'P2', text: `${a.name} ${q.label} ${q.done}/${q.planned}，额度将满` });
+    // 帖过点未发
+    for (const pq of postsQueue) if (pq.account === a.key && pq.status === 'planned' && Date.parse(pq.postAt) < Date.now() - 5 * 60000) alerts.push({ level: 'P1', text: `${a.name} 定时帖 ${(pq.postAt || '').slice(11, 16)} 已过点 5 分钟仍未执行` });
+    // 健康快照过期
+    if (a.isRun && a.asOf && a.asOf < TODAY) alerts.push({ level: 'P2', text: `${a.name} 健康快照截至 ${a.asOf}，今日 09:00 日检未跑或未落盘` });
+  }
+  // 调度静默
+  if (heartbeatAt && Date.now() - Date.parse(heartbeatAt) > 90 * 60000) {
+    const h = new Date(Date.parse(heartbeatAt) + 8 * 3600000).toISOString().slice(11, 16);
+    alerts.push({ level: 'P1', text: `调度静默：最后日志 ${h}（已 ${Math.round((Date.now() - Date.parse(heartbeatAt)) / 60000)} 分钟无动作）` });
+  }
+  alerts.sort((x, y) => x.level.localeCompare(y.level));
+
+  return { generatedAt: new Date().toISOString(), days: DAYS_ARR, hdays: HDAYS_ARR, taskRows, reports, accounts, postsBudget,
+    overview: { pause, heartbeatAt, nextWindow, windowsList, postsQueue, actionStream, alerts } };
 }
 function normalizeGrid(g) {
   const out = {};
