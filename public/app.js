@@ -34,6 +34,11 @@ function render() {
     document.getElementById('view-overview').innerHTML = '';
     document.getElementById('view-data').innerHTML = renderData(cur());
     document.getElementById('view-task').innerHTML = renderTask(cur());
+    // 修复（10-18）：从总览切到账号时数据页一直 display:none——内容填了但看不见
+    // 默认显示"数据"页签（如果用户没手动切到任务页）
+    if (document.getElementById('view-data').style.display === 'none' && document.getElementById('view-task').style.display === 'none') {
+      switchTab('data');
+    }
   }
 }
 
