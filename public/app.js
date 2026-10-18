@@ -1,18 +1,22 @@
 
-var DATA = null, CUR = null;
+var DATA = null, CUR = '__overview__';
 function vDot(v) { return v === 'green' ? 'g' : v === 'suspended' ? 'r' : 'u'; }
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function switchTab(t) {
-  document.getElementById('tab-overview').className = t === 'overview' ? 'on' : '';
   document.getElementById('tab-data').className = t === 'data' ? 'on' : '';
   document.getElementById('tab-task').className = t === 'task' ? 'on' : '';
-  document.getElementById('view-overview').style.display = t === 'overview' ? '' : 'none';
   document.getElementById('view-data').style.display = t === 'data' ? '' : 'none';
   document.getElementById('view-task').style.display = t === 'task' ? '' : 'none';
 }
-function pick(i) { CUR = DATA.accounts[i].key; render(); }
+function pick(i) {
+  CUR = i === -1 ? '__overview__' : DATA.accounts[i].key;
+  render();
+}
 function render() {
-  var side = '';
+  var isOverview = CUR === '__overview__';
+  var side = '<button class="acct-btn' + (isOverview ? ' on' : '') + '" onclick="pick(-1)" style="border-bottom:1px solid #1b3247;margin-bottom:10px;padding-bottom:12px">'
+    + '<span style="font-size:18px">📊</span><span class="nm" style="font-size:15px">总览</span>'
+    + '<div class="h">' + (DATA.overview && DATA.overview.alerts && DATA.overview.alerts.length ? DATA.overview.alerts.length + ' 项需关注' : '全部正常') + '</div></button>';
   for (var i = 0; i < DATA.accounts.length; i++) {
     var a = DATA.accounts[i];
     side += '<button class="acct-btn' + (a.key === CUR ? ' on' : '') + '" onclick="pick(' + i + ')" title="' + esc(a.roleNote) + '">'
@@ -21,9 +25,16 @@ function render() {
   }
   document.getElementById('accts').innerHTML = side;
   document.getElementById('meta').textContent = '生成 ' + new Date(DATA.generatedAt).toLocaleTimeString('zh-CN') + ' · 60s 自动刷新';
-  document.getElementById('view-overview').innerHTML = renderOverview();
-  document.getElementById('view-data').innerHTML = renderData(cur());
-  document.getElementById('view-task').innerHTML = renderTask(cur());
+  document.getElementById('tabs').style.display = isOverview ? 'none' : '';
+  document.getElementById('view-title').textContent = isOverview ? '' : cur() ? cur().name + ' · @' + cur().handle : '';
+  document.getElementById('view-overview').style.display = isOverview ? '' : 'none';
+  if (isOverview) {
+    document.getElementById('view-overview').innerHTML = renderOverview();
+  } else {
+    document.getElementById('view-overview').innerHTML = '';
+    document.getElementById('view-data').innerHTML = renderData(cur());
+    document.getElementById('view-task').innerHTML = renderTask(cur());
+  }
 }
 
 // ── 总览层（10-18 三方方案 ③）────────────────────────────
@@ -323,7 +334,7 @@ function renderTask(a) {
 function load() {
   fetch('/api/data').then(function (r) { return r.json(); }).then(function (j) {
     DATA = j;
-    if (!CUR && j.accounts.length) CUR = j.accounts[0].key;
+    // CUR 默认=总览（侧栏第一个入口）
     document.getElementById('conn-warn') && (document.getElementById('conn-warn').style.display = 'none');
     render();
   }).catch(function (e) { // 10-18 修复：断流不再静默保持旧渲染（曾是最危险的误判源）

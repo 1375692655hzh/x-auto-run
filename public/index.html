@@ -14,12 +14,12 @@
     <div id="accts"></div>
   </div>
   <div class="main">
-    <div class="topbar">
-      <div class="tabs">
-        <button id="tab-overview" class="on" onclick="switchTab('overview')">总览</button>
-        <button id="tab-data" onclick="switchTab('data')">数据</button>
+    <div class="topbar" id="topbar">
+      <div class="tabs" id="tabs" style="display:none">
+        <button id="tab-data" class="on" onclick="switchTab('data')">数据</button>
         <button id="tab-task" onclick="switchTab('task')">任务</button>
       </div>
+      <div id="view-title" style="font-size:16px;font-weight:700;color:#24557a;padding:4px 0"></div>
       <button class="btn-refresh" onclick="load()">刷新</button>
       <div class="meta" id="meta"></div>
       <div id="conn-warn" style="display:none;background:#fdecea;color:#c0392b;padding:6px 12px;border-radius:6px;margin:6px 0;font-size:13px"></div>
