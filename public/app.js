@@ -236,24 +236,26 @@ function renderOverview() {
   }
   h += '</div>';
 
-  // 全账号核心指标一览（轻量数据，来自健康快照）
-  h += '<div class="card"><h3>全账号核心指标<span style="font-weight:400;font-size:11px;color:#98a5b1">（每日 09:00 更新 · 纯 HTTP · 零浏览器）</span></h3>';
-  h += '<table style="width:100%;font-size:13px;border-collapse:collapse"><tr style="color:#8a97a3;font-size:11px"><td style="padding:4px 8px">账号</td><td>粉丝</td><td>关注</td><td>比</td><td>原创帖</td><td>互关占比</td><td>雷达</td></tr>';
+  // 全账号核心指标一览（纯 HTTP 数据——不开浏览器就能拿，FxTwitter 匿名 API）
+  h += '<div class="card"><h3>全账号指标<span style="font-weight:400;font-size:11px;color:#98a5b1">（纯 HTTP · 不开浏览器 · 每日 09:00 自动更新）</span></h3>';
+  h += '<table style="width:100%;font-size:13px;border-collapse:collapse"><tr style="color:#8a97a3;font-size:11px"><td style="padding:4px 8px">账号</td><td>粉丝</td><td>关注</td><td>比</td><td>原创帖</td><td>回复24h</td><td>最新帖</td></tr>';
   for (var mi = 0; mi < DATA.accounts.length; mi++) {
     var ma = DATA.accounts[mi];
     var fol = ma.metrics[0] && ma.metrics[0].val != null ? ma.metrics[0].val : '—';
     var fng = ma.metrics[1] && ma.metrics[1].val != null ? ma.metrics[1].val : '—';
     var ratio = ma.metrics[2] ? ma.metrics[2].val : '—';
     var posts = ma.metrics[3] && ma.metrics[3].val != null ? ma.metrics[3].val : '—';
-    var mutual = ma.metrics[5] ? ma.metrics[5].val || '—' : '—';
-    var radarS = ma.radar && ma.radar.four ? (ma.radar.four.score || '?') : '?';
+    var replies = ma.metrics[4] && ma.metrics[4].val != null ? ma.metrics[4].val : '—';
+    var newest = ma.dims && ma.dims[0] ? String(ma.dims[0].st || '').split('·')[1] || '' : '';
+    newest = newest.trim().replace(/\s+/g, ' ').slice(0, 12);
     var delta = ma.metrics[0] && ma.metrics[0].txt !== '—' ? ma.metrics[0].txt.split('（')[0] : '';
     h += '<tr style="border-top:1px solid #f0f3f6"><td style="padding:6px 8px;font-weight:700">' + esc(ma.name) + (ma.isRun ? '' : ' <span style="font-size:10px;color:#8a97a3">(' + (ma.role === 'observer' ? '观察' : '接入') + ')</span>') + '</td>';
     h += '<td><b>' + fol + '</b> <span style="font-size:11px;color:' + (delta.indexOf('▲') >= 0 ? '#c0392b' : delta.indexOf('▼') >= 0 ? '#1f6e43' : '#8a97a3') + '">' + delta + '</span></td>';
-    h += '<td>' + fng + '</td><td>' + ratio + '</td><td>' + posts + '</td><td>' + mutual + '</td>';
-    h += '<td style="color:' + (parseInt(radarS) >= 90 ? '#1f6e43' : parseInt(radarS) >= 70 ? '#c2761b' : '#c0392b') + '">' + radarS + '</td></tr>';
+    h += '<td>' + fng + '</td><td>' + ratio + '</td><td>' + posts + '</td><td>' + replies + '</td>';
+    h += '<td style="font-size:12px;color:#6b7885">' + esc(newest) + '</td></tr>';
   }
-  h += '</table></div>';
+  h += '</table>';
+  h += '<div style="font-size:11px;color:#98a5b1;margin-top:6px">互关占比/雷达四维度需开窗采集，在<a href="#" onclick="pick(0);switchTab(\'data\');return false" style="color:#3d8fd1">各账号数据页</a>查看</div></div>';
 
   // title 前缀
   var alertCount = ov.alerts.filter(function(x) { return x.level === 'P0' || x.level === 'P1'; }).length;
