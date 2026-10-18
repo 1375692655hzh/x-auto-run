@@ -67,7 +67,7 @@ function countedToday(kind) { // 今日各窗已排的某类条目（planned/int
   for (const w of WINS) for (const e of loadQueue(w)) if (e.kind === kind && e.status !== 'skipped') n += 1;
   return n;
 }
-const dailyQuota = (kind) => WINS.reduce((s, w) => s + (RQ[kind] || {})[w], 0) || 0;
+const dailyQuota = (kind) => WINS.reduce((s, w) => s + ((RQ[kind] || {})[w] || 0), 0); // 10-18 修复：p 窗无值致 NaN→0→额度永远为 0
 const windowQuota = (kind) => (RQ[kind] || {})[WINDOW] || 0;
 
 // ── FxTwitter：取对象最新一条自发非回复帖（≤72h） ──

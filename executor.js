@@ -339,7 +339,7 @@ async function postTweet(page, text) {
   if (r !== true) return { ok: r === true, unknown: r === 'unknown', raw: r };
   // C3 语义分叉（三方方案）：读 toast 区分"新发"vs"已存在"（发过了/already=重复，非新发成功）
   const toast = await page.evaluate(() => ((document.querySelector('[data-testid="toast"]') || {}).textContent || '').trim()).catch(() => '');
-  return /发过|already/i.test(toast || '') ? { ok: true, note: '已存在（重复，非本次新发）' } : { ok: true, note: quoteUrl ? '新发·引用帖' : '新发' };
+  return /发过|already/i.test(toast || '') ? { ok: true, note: '已存在（重复，非本次新发）' } : { ok: true, note: '新发' }; // 10-18 修复：引用帖变体由 postQuote 处理，此处删残留 quoteUrl 引用
 }
 
 // 引用帖（10-18 云端 quote 标记）：进原帖 → 转推按钮 → 菜单"引用" → 带卡片弹窗输入提交
