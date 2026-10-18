@@ -163,6 +163,98 @@ function renderOverview() {
     h += '</div>';
   }
 
+  // 全账号粉丝走势（同框折线，数据=健康日检快照，纯 HTTP 零浏览器）
+  h += '<div class="card"><h3>粉丝走势 · 四号同框（近 7 日）<span style="font-weight:400;font-size:11px;color:#98a5b1">数据源=每日 09:00 健康日检（FxTwitter 匿名 HTTP）</span></h3>';
+  var COLORS = { butcher: '#3d8fd1', wcixot: '#e5732a', owen: '#7cb342', fullwin: '#926fc6' };
+  var W = 800, H = 160, pad = 50, padB = 24;
+  var allSeries = [];
+  for (var ai = 0; ai < DATA.accounts.length; ai++) {
+    var acc = DATA.accounts[ai];
+    if (acc.series && acc.series.length >= 2) allSeries.push({ key: acc.key, name: acc.name, series: acc.series, color: COLORS[acc.key] || '#999' });
+  }
+  if (allSeries.length >= 2) {
+    var dates = DATA.hdays || [];
+    var minV = Infinity, maxV = -Infinity;
+    for (var si = 0; si < allSeries.length; si++) {
+      for (var sj = 0; sj < allSeries[si].series.length; sj++) {
+        var v = allSeries[si].series[sj].v;
+        if (v != null && v < minV) minV = v;
+        if (v != null && v > maxV) maxV = v;
+      }
+    }
+    if (minV === Infinity) { minV = 0; maxV = 100; }
+    var range = maxV - minV || 1;
+    minV = Math.max(0, minV - range * 0.05);
+    maxV = maxV + range * 0.05;
+    range = maxV - minV;
+    h += '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
+    // Y 轴
+    h += '<line x1="' + pad + '" y1="10" x2="' + pad + '" y2="' + (H - padB) + '" stroke="#e4eaf0"/><line x1="' + pad + '" y1="' + (H - padB) + '" x2="' + (W - 10) + '" y2="' + (H - padB) + '" stroke="#e4eaf0"/>';
+    // Y 刻度（3 条）
+    for (var yk = 0; yk <= 2; yk++) {
+      var yv = minV + range * (yk / 2);
+      var yy = 10 + (H - padB - 10) * (1 - yk / 2);
+      h += '<text x="' + (pad - 6) + '" y="' + (yy + 4) + '" font-size="10" text-anchor="end" fill="#8a97a3">' + Math.round(yv) + '</text>';
+      h += '<line x1="' + pad + '" y1="' + yy + '" x2="' + (W - 10) + '" y2="' + yy + '" stroke="#f0f3f6" stroke-dasharray="3,3"/>';
+    }
+    // X 刻度（日期）
+    for (var xk = 0; xk < dates.length; xk++) {
+      var xx = pad + (W - pad - 10) * (dates.length > 1 ? xk / (dates.length - 1) : 0);
+      h += '<text x="' + xx + '" y="' + (H - 8) + '" font-size="9" text-anchor="middle" fill="#8a97a3">' + dates[xk].slice(5) + '</text>';
+    }
+    // 每号一条折线
+    for (var li = 0; li < allSeries.length; li++) {
+      var ln = allSeries[li];
+      var pts = '';
+      var labelX = 0, labelY = 0, labelV = null;
+      for (var pi = 0; pi < ln.series.length; pi++) {
+        var sv = ln.series[pi].v;
+        if (sv == null) continue;
+        var px = pad + (W - pad - 10) * (ln.series.length > 1 ? pi / (ln.series.length - 1) : 0);
+        var py = 10 + (H - padB - 10) * (1 - (sv - minV) / range);
+        pts += (pts ? ' ' : '') + px.toFixed(1) + ',' + py.toFixed(1);
+        if (pi === ln.series.length - 1) { labelX = px; labelY = py; labelV = sv; }
+      }
+      if (pts) {
+        h += '<polyline points="' + pts + '" fill="none" stroke="' + ln.color + '" stroke-width="2" opacity="0.85"/>';
+        // 最新点标注
+        h += '<circle cx="' + labelX + '" cy="' + labelY + '" r="3" fill="' + ln.color + '"><title>' + ln.name + ' ' + labelV + '粉</title></circle>';
+      }
+    }
+    // 图例
+    var lx = pad + 8;
+    for (var gi = 0; gi < allSeries.length; gi++) {
+      var gl = allSeries[gi];
+      var lastV = gl.series.length ? gl.series[gl.series.length - 1].v : '?';
+      h += '<rect x="' + lx + '" y="' + (H - padB - 18) + '" width="10" height="3" fill="' + gl.color + '" rx="1"/>';
+      h += '<text x="' + (lx + 14) + '" y="' + (H - padB - 13) + '" font-size="10" fill="#51606e">' + gl.name + ' ' + (lastV != null ? lastV : '?') + '</text>';
+      lx += 14 + (gl.name.length * 10) + String(lastV || '?').length * 6 + 24;
+    }
+    h += '</svg>';
+  } else {
+    h += '<div style="font-size:13px;color:#8a97a3;padding:20px 0;text-align:center">快照不足（每日 09:00 健康检测后自动出图）</div>';
+  }
+  h += '</div>';
+
+  // 全账号核心指标一览（轻量数据，来自健康快照）
+  h += '<div class="card"><h3>全账号核心指标<span style="font-weight:400;font-size:11px;color:#98a5b1">（每日 09:00 更新 · 纯 HTTP · 零浏览器）</span></h3>';
+  h += '<table style="width:100%;font-size:13px;border-collapse:collapse"><tr style="color:#8a97a3;font-size:11px"><td style="padding:4px 8px">账号</td><td>粉丝</td><td>关注</td><td>比</td><td>原创帖</td><td>互关占比</td><td>雷达</td></tr>';
+  for (var mi = 0; mi < DATA.accounts.length; mi++) {
+    var ma = DATA.accounts[mi];
+    var fol = ma.metrics[0] && ma.metrics[0].val != null ? ma.metrics[0].val : '—';
+    var fng = ma.metrics[1] && ma.metrics[1].val != null ? ma.metrics[1].val : '—';
+    var ratio = ma.metrics[2] ? ma.metrics[2].val : '—';
+    var posts = ma.metrics[3] && ma.metrics[3].val != null ? ma.metrics[3].val : '—';
+    var mutual = ma.metrics[5] ? ma.metrics[5].val || '—' : '—';
+    var radarS = ma.radar && ma.radar.four ? (ma.radar.four.score || '?') : '?';
+    var delta = ma.metrics[0] && ma.metrics[0].txt !== '—' ? ma.metrics[0].txt.split('（')[0] : '';
+    h += '<tr style="border-top:1px solid #f0f3f6"><td style="padding:6px 8px;font-weight:700">' + esc(ma.name) + (ma.isRun ? '' : ' <span style="font-size:10px;color:#8a97a3">(' + (ma.role === 'observer' ? '观察' : '接入') + ')</span>') + '</td>';
+    h += '<td><b>' + fol + '</b> <span style="font-size:11px;color:' + (delta.indexOf('▲') >= 0 ? '#c0392b' : delta.indexOf('▼') >= 0 ? '#1f6e43' : '#8a97a3') + '">' + delta + '</span></td>';
+    h += '<td>' + fng + '</td><td>' + ratio + '</td><td>' + posts + '</td><td>' + mutual + '</td>';
+    h += '<td style="color:' + (parseInt(radarS) >= 90 ? '#1f6e43' : parseInt(radarS) >= 70 ? '#c2761b' : '#c0392b') + '">' + radarS + '</td></tr>';
+  }
+  h += '</table></div>';
+
   // title 前缀
   var alertCount = ov.alerts.filter(function(x) { return x.level === 'P0' || x.level === 'P1'; }).length;
   document.title = (ov.pause ? '[急停]' : alertCount ? '[' + alertCount + '项异常]' : '') + ' X 运营监控';
