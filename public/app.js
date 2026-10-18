@@ -163,10 +163,13 @@ function renderOverview() {
     h += '</div>';
   }
 
-  // 全账号粉丝走势（同框折线，数据=健康日检快照，纯 HTTP 零浏览器）
-  h += '<div class="card"><h3>粉丝走势 · 四号同框（近 7 日）<span style="font-weight:400;font-size:11px;color:#98a5b1">数据源=每日 09:00 健康日检（FxTwitter 匿名 HTTP）</span></h3>';
+  // 全账号数据区（左右各半：左=粉丝走势折线，右=核心指标表；数据=健康日检快照，纯 HTTP 零浏览器）
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">';
+
+  // 左：粉丝走势折线
+  h += '<div class="card"><h3>粉丝走势 · 四号同框<span style="font-weight:400;font-size:11px;color:#98a5b1">（近 7 日 · 纯 HTTP）</span></h3>';
   var COLORS = { butcher: '#3d8fd1', wcixot: '#e5732a', owen: '#7cb342', fullwin: '#926fc6' };
-  var W = 800, H = 160, pad = 50, padB = 24;
+  var W = 400, H = 140, pad = 44, padB = 20;
   var allSeries = [];
   for (var ai = 0; ai < DATA.accounts.length; ai++) {
     var acc = DATA.accounts[ai];
@@ -188,57 +191,46 @@ function renderOverview() {
     maxV = maxV + range * 0.05;
     range = maxV - minV;
     h += '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
-    // Y 轴
-    h += '<line x1="' + pad + '" y1="10" x2="' + pad + '" y2="' + (H - padB) + '" stroke="#e4eaf0"/><line x1="' + pad + '" y1="' + (H - padB) + '" x2="' + (W - 10) + '" y2="' + (H - padB) + '" stroke="#e4eaf0"/>';
-    // Y 刻度（3 条）
+    h += '<line x1="' + pad + '" y1="8" x2="' + pad + '" y2="' + (H - padB) + '" stroke="#e4eaf0"/><line x1="' + pad + '" y1="' + (H - padB) + '" x2="' + (W - 8) + '" y2="' + (H - padB) + '" stroke="#e4eaf0"/>';
     for (var yk = 0; yk <= 2; yk++) {
       var yv = minV + range * (yk / 2);
-      var yy = 10 + (H - padB - 10) * (1 - yk / 2);
-      h += '<text x="' + (pad - 6) + '" y="' + (yy + 4) + '" font-size="10" text-anchor="end" fill="#8a97a3">' + Math.round(yv) + '</text>';
-      h += '<line x1="' + pad + '" y1="' + yy + '" x2="' + (W - 10) + '" y2="' + yy + '" stroke="#f0f3f6" stroke-dasharray="3,3"/>';
+      var yy = 8 + (H - padB - 8) * (1 - yk / 2);
+      h += '<text x="' + (pad - 5) + '" y="' + (yy + 4) + '" font-size="9" text-anchor="end" fill="#8a97a3">' + Math.round(yv) + '</text>';
+      h += '<line x1="' + pad + '" y1="' + yy + '" x2="' + (W - 8) + '" y2="' + yy + '" stroke="#f0f3f6" stroke-dasharray="3,3"/>';
     }
-    // X 刻度（日期）
     for (var xk = 0; xk < dates.length; xk++) {
-      var xx = pad + (W - pad - 10) * (dates.length > 1 ? xk / (dates.length - 1) : 0);
-      h += '<text x="' + xx + '" y="' + (H - 8) + '" font-size="9" text-anchor="middle" fill="#8a97a3">' + dates[xk].slice(5) + '</text>';
+      var xx = pad + (W - pad - 8) * (dates.length > 1 ? xk / (dates.length - 1) : 0);
+      h += '<text x="' + xx + '" y="' + (H - 6) + '" font-size="8" text-anchor="middle" fill="#8a97a3">' + dates[xk].slice(5) + '</text>';
     }
-    // 每号一条折线
     for (var li = 0; li < allSeries.length; li++) {
       var ln = allSeries[li];
       var pts = '';
-      var labelX = 0, labelY = 0, labelV = null;
       for (var pi = 0; pi < ln.series.length; pi++) {
         var sv = ln.series[pi].v;
         if (sv == null) continue;
-        var px = pad + (W - pad - 10) * (ln.series.length > 1 ? pi / (ln.series.length - 1) : 0);
-        var py = 10 + (H - padB - 10) * (1 - (sv - minV) / range);
+        var px = pad + (W - pad - 8) * (ln.series.length > 1 ? pi / (ln.series.length - 1) : 0);
+        var py = 8 + (H - padB - 8) * (1 - (sv - minV) / range);
         pts += (pts ? ' ' : '') + px.toFixed(1) + ',' + py.toFixed(1);
-        if (pi === ln.series.length - 1) { labelX = px; labelY = py; labelV = sv; }
       }
-      if (pts) {
-        h += '<polyline points="' + pts + '" fill="none" stroke="' + ln.color + '" stroke-width="2" opacity="0.85"/>';
-        // 最新点标注
-        h += '<circle cx="' + labelX + '" cy="' + labelY + '" r="3" fill="' + ln.color + '"><title>' + ln.name + ' ' + labelV + '粉</title></circle>';
-      }
+      if (pts) h += '<polyline points="' + pts + '" fill="none" stroke="' + ln.color + '" stroke-width="2" opacity="0.85"/>';
     }
-    // 图例
-    var lx = pad + 8;
+    h += '</svg>';
+    // 图例放 SVG 外面（HTML flex，不跟折线重叠）
+    h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">';
     for (var gi = 0; gi < allSeries.length; gi++) {
       var gl = allSeries[gi];
       var lastV = gl.series.length ? gl.series[gl.series.length - 1].v : '?';
-      h += '<rect x="' + lx + '" y="' + (H - padB - 18) + '" width="10" height="3" fill="' + gl.color + '" rx="1"/>';
-      h += '<text x="' + (lx + 14) + '" y="' + (H - padB - 13) + '" font-size="10" fill="#51606e">' + gl.name + ' ' + (lastV != null ? lastV : '?') + '</text>';
-      lx += 14 + (gl.name.length * 10) + String(lastV || '?').length * 6 + 24;
+      h += '<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:#51606e"><span style="width:12px;height:3px;background:' + gl.color + ';border-radius:2px;display:inline-block"></span>' + esc(gl.name) + ' <b>' + (lastV != null ? lastV : '?') + '</b></span>';
     }
-    h += '</svg>';
+    h += '</div>';
   } else {
-    h += '<div style="font-size:13px;color:#8a97a3;padding:20px 0;text-align:center">快照不足（每日 09:00 健康检测后自动出图）</div>';
+    h += '<div style="font-size:13px;color:#8a97a3;padding:20px 0;text-align:center">快照不足（09:00 后出图）</div>';
   }
   h += '</div>';
 
-  // 全账号核心指标一览（纯 HTTP 数据——不开浏览器就能拿，FxTwitter 匿名 API）
-  h += '<div class="card"><h3>全账号指标<span style="font-weight:400;font-size:11px;color:#98a5b1">（纯 HTTP · 不开浏览器 · 每日 09:00 自动更新）</span></h3>';
-  h += '<table style="width:100%;font-size:13px;border-collapse:collapse"><tr style="color:#8a97a3;font-size:11px"><td style="padding:4px 8px">账号</td><td>粉丝</td><td>关注</td><td>比</td><td>原创帖</td><td>回复24h</td><td>最新帖</td></tr>';
+  // 右：全账号指标表（纯 HTTP）
+  h += '<div class="card"><h3>全账号指标<span style="font-weight:400;font-size:11px;color:#98a5b1">（纯 HTTP · 不开浏览器）</span></h3>';
+  h += '<table style="width:100%;font-size:12px;border-collapse:collapse"><tr style="color:#8a97a3;font-size:10px"><td style="padding:3px 6px">账号</td><td>粉丝</td><td>关注</td><td>比</td><td>帖</td><td>回24h</td></tr>';
   for (var mi = 0; mi < DATA.accounts.length; mi++) {
     var ma = DATA.accounts[mi];
     var fol = ma.metrics[0] && ma.metrics[0].val != null ? ma.metrics[0].val : '—';
@@ -246,16 +238,15 @@ function renderOverview() {
     var ratio = ma.metrics[2] ? ma.metrics[2].val : '—';
     var posts = ma.metrics[3] && ma.metrics[3].val != null ? ma.metrics[3].val : '—';
     var replies = ma.metrics[4] && ma.metrics[4].val != null ? ma.metrics[4].val : '—';
-    var newest = ma.dims && ma.dims[0] ? String(ma.dims[0].st || '').split('·')[1] || '' : '';
-    newest = newest.trim().replace(/\s+/g, ' ').slice(0, 12);
     var delta = ma.metrics[0] && ma.metrics[0].txt !== '—' ? ma.metrics[0].txt.split('（')[0] : '';
-    h += '<tr style="border-top:1px solid #f0f3f6"><td style="padding:6px 8px;font-weight:700">' + esc(ma.name) + (ma.isRun ? '' : ' <span style="font-size:10px;color:#8a97a3">(' + (ma.role === 'observer' ? '观察' : '接入') + ')</span>') + '</td>';
-    h += '<td><b>' + fol + '</b> <span style="font-size:11px;color:' + (delta.indexOf('▲') >= 0 ? '#c0392b' : delta.indexOf('▼') >= 0 ? '#1f6e43' : '#8a97a3') + '">' + delta + '</span></td>';
-    h += '<td>' + fng + '</td><td>' + ratio + '</td><td>' + posts + '</td><td>' + replies + '</td>';
-    h += '<td style="font-size:12px;color:#6b7885">' + esc(newest) + '</td></tr>';
+    h += '<tr style="border-top:1px solid #f0f3f6"><td style="padding:5px 6px;font-weight:700">' + esc(ma.name) + (ma.isRun ? '' : ' <span style="font-size:9px;color:#8a97a3">(' + (ma.role === 'observer' ? '观察' : '接入') + ')</span>') + '</td>';
+    h += '<td><b>' + fol + '</b> <span style="font-size:10px;color:' + (delta.indexOf('▲') >= 0 ? '#c0392b' : delta.indexOf('▼') >= 0 ? '#1f6e43' : '#8a97a3') + '">' + delta + '</span></td>';
+    h += '<td>' + fng + '</td><td>' + ratio + '</td><td>' + posts + '</td><td>' + replies + '</td></tr>';
   }
   h += '</table>';
-  h += '<div style="font-size:11px;color:#98a5b1;margin-top:6px">互关占比/雷达四维度需开窗采集，在<a href="#" onclick="pick(0);switchTab(\'data\');return false" style="color:#3d8fd1">各账号数据页</a>查看</div></div>';
+  h += '<div style="font-size:10px;color:#98a5b1;margin-top:5px">互关占比/雷达在<a href="#" onclick="pick(0);switchTab(\'data\');return false" style="color:#3d8fd1">各号数据页</a></div></div>';
+
+  h += '</div>'; // 关闭左右 grid
 
   // title 前缀
   var alertCount = ov.alerts.filter(function(x) { return x.level === 'P0' || x.level === 'P1'; }).length;
