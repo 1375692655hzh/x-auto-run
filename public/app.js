@@ -29,6 +29,9 @@ function render() {
   document.getElementById('view-title').textContent = isOverview ? '' : cur() ? cur().name + ' · @' + cur().handle : '';
   document.getElementById('view-overview').style.display = isOverview ? '' : 'none';
   if (isOverview) {
+    // 修复（10-18）：切回总览时必须同时隐藏数据/任务页，否则上次的内容残留在下方
+    document.getElementById('view-data').style.display = 'none';
+    document.getElementById('view-task').style.display = 'none';
     document.getElementById('view-overview').innerHTML = renderOverview();
   } else {
     document.getElementById('view-overview').innerHTML = '';
