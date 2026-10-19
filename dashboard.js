@@ -315,12 +315,22 @@ function buildData() {
       { label: '点赞', unit: '赞', done: ((g1.graph || {}).count || 0) + ((g1.maintain || {}).count || 0), planned: ((CFG.executor && CFG.executor.rollingCaps || {}).like != null ? CFG.executor.rollingCaps.like : null), plannedText: '≤' + (((CFG.executor || {}).rollingCaps || {}).like ?? 20) + ' 引擎帽', note: '含权重维护互动点赞（10-18 修复：原只数已退役图谱行）' },
       { label: '取关', unit: '人', done: sumWin('unfollow'), planned: 0, plannedText: '0（不做）', note: '你拍板不做（unfollowPolicy off + 滚动帽 0 双保险）' },
     ];
+    // 健康判定（10-19 用户拍板：雷达为主，FxTwitter 为辅）——有雷达数据时用雷达判定（权威），没跑雷达才退回 FxTwitter 三通道 verdict
+    const radarVerdict = (() => {
+      if (!radar || !radar.four) return null;
+      const bad = ['ghost', 'deboost', 'search', 'suggestion'].filter((k) => radar.four[k] && !/未见/.test(radar.four[k]));
+      if (bad.length === 0) return 'green';
+      if (bad.includes('ghost') || bad.includes('deboost')) return 'restricted';
+      return 'yellow';
+    })();
+    const fxVerdict = tE ? tE.verdict : null;
+    const verdict = radarVerdict || (fxVerdict === 'suspended' ? 'suspended' : fxVerdict === 'green' && radarVerdict === null ? 'green' : fxVerdict);
     return {
       key: a.key, handle: a.handle, name: acctName || a.key,
       role: ({ run: '运行号（唯一授权真实互动）', linked: '已接入 · 未授权（不执行任务）', maintain: '已接入 · 维护授权（仅点赞 butcher/owen，v1.1）', observer: '观察者窗口（只读检测专用）' })[a.role || 'linked'],
       roleNote: a.note || '',
       isRun: a.role === 'run',
-      verdict: tE ? tE.verdict : null, asOf: todayKey,
+      verdict, verdictSource: radarVerdict ? 'radar' : 'fxtwitter', asOf: todayKey,
       metrics, dims, series, radar, quotas,
       todayPool, topPool, poolSummary, scanToday, maintain,
       grid: normalizeGrid(agg[a.key] || {}),
