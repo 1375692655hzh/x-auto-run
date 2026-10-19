@@ -166,6 +166,7 @@ function consumeReprobeFlag() {
       const radarBlocked = [];
       const eligible = Object.entries(M.maintainers || {})
         .filter(([k, cfgm]) => (cfgm.targets || []).includes(tKey) && acctByKey[k])
+        .filter(([k, cfgm]) => { if (cfgm.fixed) return false; return true; }) // 10-19 拍板：fixed 维护号（butcher→owen）不随帖，走固定运营窗 maintain-fixed.js
         .map(([k]) => k)
         .filter((k) => {
           if (maintainerCountToday(k) >= (M.perMaintainerDailyCap || 3)) return false;

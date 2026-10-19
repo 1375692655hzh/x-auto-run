@@ -433,8 +433,8 @@ function executeAction(page, entry) {
       if (WINDOW && e.window && e.window !== WINDOW) continue;
       const ageMin = (Date.now() - Date.parse(e.createdAt)) / 60000;
       if (ageMin > (e.ttlMin || X.queueTtlMinutes)) { e.status = 'skipped'; e.result = 'TTL 过期'; stats.skipped.push(e.id); continue; }
-      // 权重维护条目（v1.1 M2）：按发帖时间复查黄金窗，过期放弃
-      if (e.kind === 'maintain' && e.postAt) {
+      // 权重维护条目（v1.1 M2）：按发帖时间复查黄金窗，过期放弃；固定窗版（10-19 拍板，e.fixed）不守黄金窗——12:35/19:35 撞不上 45-180min，改为 maintain-fixed 已在选帖时限帖龄 20min~14h
+      if (e.kind === 'maintain' && e.postAt && !e.fixed) {
         const postAge = (Date.now() - e.postAt) / 60000;
         if (postAge > ((CFG.maintain || {}).goldenMaxMin || 180)) { e.status = 'skipped'; e.result = `黄金窗已过（帖龄${Math.round(postAge)}分钟）`; stats.skipped.push(e.id); continue; }
       }

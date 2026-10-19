@@ -83,7 +83,9 @@
         "actions": [
           "like",
           "reply"
-        ]
+        ],
+        "fixed": "p2,p3",
+        "note": "10-19 拍板：不随帖侦测，固定进 12:35/19:35 运营窗（maintain-fixed.js 消费 fixed 字段；maintain-watch 侦测跳过带 fixed 的维护号）"
       },
       "fullwin": {
         "targets": [
@@ -257,15 +259,18 @@
       },
       "p1": {
         "time": "09:35",
-        "modes": "pull,visit,post"
+        "modes": "pull,community,replyfollowback,visit,post",
+        "note": "10-19 拍板 butcher 收成 3+1：运营窗①=一次开窗全做（拉取+互关+条件回关+串门+发帖）。wcixot 仍走发布窗窄模式——其 bat 显式 --modes pull,visit,post 锁定，不受本配置影响"
       },
       "p2": {
         "time": "12:35",
-        "modes": "pull,visit,post"
+        "modes": "pull,community,replyfollowback,visit,post,maintain",
+        "note": "运营窗②，含权重维护（10-19 拍板：butcher→owen 维护不随帖，固定进午/晚两窗，早上不做）"
       },
       "p3": {
         "time": "19:35",
-        "modes": "pull,visit,post"
+        "modes": "pull,community,replyfollowback,visit,post,maintain",
+        "note": "运营窗③，含权重维护（同 p2）"
       }
     },
     "quotas": {
@@ -291,6 +296,25 @@
     "dryRounds": 2,
     "scanPosts": 30,
     "quotasByAccount": {
+      "butcher": {
+        "community": {
+          "p1": 9,
+          "p2": 8,
+          "p3": 8
+        },
+        "replyFollowBack": {
+          "p1": 7,
+          "p2": 7,
+          "p3": 6
+        },
+        "visit": {
+          "p1": 3,
+          "p2": 3,
+          "p3": 4
+        },
+        "followBack": 0,
+        "note": "10-19 拍板 butcher 3+1 收窗：互关 25/天改三运营窗 9+8+8；条件回关 20/天改 7+7+6（原四窗 7/6/6/6 与 5/5/5/5 作废）"
+      },
       "wcixot": {
         "community": {
           "am": 5,

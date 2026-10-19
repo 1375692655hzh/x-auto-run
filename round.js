@@ -57,6 +57,11 @@ const run = (args, opts = {}) => {
   const okPlan = run([path.join(ROOT, 'planner.js'), '--account', ACCOUNT, '--mode', MODES, '--window', WINDOW]);
   if (!okPlan) log({ action: 'round', window: WINDOW, note: 'planner 失败' });
 
+  // 固定窗权重维护（10-19 拍板：不随帖，固定进运营窗）：条目直接追加进本窗队列，executor 同会话消费
+  if (MODES.includes('maintain')) {
+    run([path.join(ROOT, 'maintain-fixed.js'), '--account', ACCOUNT, '--window', WINDOW]);
+  }
+
   const queueFile = path.join(ROOT, 'queue', `${today()}-${WINDOW}-${ACCOUNT}.json`);
   if (!fs.existsSync(queueFile)) {
     console.log('本轮无队列（候选不足或额度已满）');

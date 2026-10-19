@@ -266,7 +266,8 @@ async function readNotifs(page) {
 }
 async function scanOwnNotifications(led) {
   const hour = new Date().getHours();
-  if (hour < L.activeHours[0] || hour >= L.activeHours[1]) throw new Error(`不在执行窗 ${L.activeHours[0]}:00-${L.activeHours[1]}:00（只读扫描同样守窗，明早窗内再跑）`);
+  // --night：半夜数据窗专用旁路（10-19 拍板 butcher 3+1 收窗：通知扫描挪进凌晨链，凌晨 2-5 点低峰窗与互关粉丝扫描同链）
+  if (!argv.includes('--night') && (hour < L.activeHours[0] || hour >= L.activeHours[1])) throw new Error(`不在执行窗 ${L.activeHours[0]}:00-${L.activeHours[1]}:00（只读扫描同样守窗，明早窗内再跑；半夜链用 --night）`);
   if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) throw new Error('state/PAUSE 急停生效中');
   const deadline = Date.now() + C.maxSessionMinutes * 60000;
   const ws = await openWindow(ACCT.profileId);
