@@ -408,10 +408,12 @@ async function planPost(ts) {
   for (const w of WINS) for (const e of loadQueue(w)) if (e.text) seen.add(e.text);
   const baseId = loadQueue(WINDOW).length;
   const out = [];
-  // 定时发布（10-18 用户拍板）：每条帖带 postAt 精确时刻=窗起点+累计随机间隔(1~10min/条)，由 round 到点逐条单独拉起
+  // 定时发布（10-18 用户拍板）：每条帖带 postAt 精确时刻=窗起点+首帖起步延迟+累计随机间隔(1~10min/条)，由 round 到点逐条单独拉起
   const GAP = (CFG.posts || {}).gapMin || [1, 10];
+  // 首帖起步延迟 0~5min（10-19 拍板）：三号同刻开窗，原"第1条=窗起点即发"会让三号首帖全落同一 49 秒带=协同时间指纹；每号每天独立掷一次
+  const FD = (CFG.posts || {}).firstPostDelayMin || [0, 5];
   const wTime = (((CFG.rounds || {}).windows || {})[WINDOW] || {}).time || '09:35';
-  let cumMin = 0;
+  let cumMin = FD[0] + Math.random() * (FD[1] - FD[0]);
   for (const t of texts) {
     if (out.length >= cap - inWindow) break;
     if (!t || !t.text || seen.has(t.text)) { console.log('  跳过（空/重复）:', String(t.text).slice(0, 24)); continue; }

@@ -527,7 +527,12 @@
     "gapMin": [
       1,
       10
-    ]
+    ],
+    "firstPostDelayMin": [
+      0,
+      5
+    ],
+    "firstPostDelayNote": "10-19 拍板：首帖=窗起点+0~5min 随机（每号每天独立），打散三号同刻首帖的 49 秒带协同指纹"
   },
   "promptsByAccount": {
     "wcixot": {
