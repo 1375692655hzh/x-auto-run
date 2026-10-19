@@ -104,7 +104,8 @@
         "fixed": "p2,p3",
         "note": "10-19 拍板：与 butcher 同款固定窗维护（12:35/19:35 运营窗内，不随帖）"
       }
-    }
+    },
+    "quotaNote": "10-20 拍板（kimi 复核建议+用户按推荐跑）：postsPerTargetPerDay=2/目标/天按维护号分账（butcher、wcixot 各自独立额度，不共享不挤占）；同帖去重仍全局（一帖只一号互动，v1.1 M3 防协同保留）；上限语义=每目标最多 2 帖/号/天×2 号=4 帖/天（低于 perTargetDailyCap 5）"
   },
   "limits": {
     "activeHours": [
