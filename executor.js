@@ -263,13 +263,16 @@ async function followUser(page, handle2) {
 // 维护前置序列（10-20 拍板，按源码权重表设计）：帖页停留 20-45s（停留=11x 最强被动信号）+
 // 40% 概率跳目标主页停 15-30s（主页访问=4x）再回来——两者对外不可见，不占任何可见动作帽
 async function maintainDwell(page, entry) {
+  const t0 = Date.now();
   try {
     const dwell1 = 20000 + Math.floor(Math.random() * 25000);
     await page.evaluate(() => window.scrollBy({ top: 200 + Math.floor(Math.random() * 300), behavior: 'smooth' })).catch(() => { });
     await sleep(dwell1 * 0.5);
     await page.evaluate(() => window.scrollBy({ top: -150, behavior: 'smooth' })).catch(() => { });
     await sleep(dwell1 * 0.5);
+    let visitedProfile = false;
     if (Math.random() < 0.4 && entry.targetHandle) {
+      visitedProfile = true;
       await page.evaluate((h) => { location.href = 'https://x.com/' + h; }, entry.targetHandle).catch(() => { });
       await sleep(1500 + Math.floor(Math.random() * 3000));
       await page.evaluate(() => window.scrollBy({ top: 300 + Math.floor(Math.random() * 400), behavior: 'smooth' })).catch(() => { });
@@ -277,6 +280,7 @@ async function maintainDwell(page, entry) {
       await gotoFeed(page, entry.postUrl);
       await sleep(1500);
     }
+    log({ action: 'maintainDwell', kind: 'maintain', target: entry.targetHandle, statusId: entry.statusId, ms: Date.now() - t0, profile: visitedProfile }); // 留痕：停留耗时计入审计（防会话死线归因盲区）
   } catch { }
 }
 
