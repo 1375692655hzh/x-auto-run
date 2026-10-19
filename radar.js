@@ -106,7 +106,7 @@ async function getResult(handle) {
     return await renderInChrome(handle);
   } catch (e) {
     console.log(`  @${handle} 无头 Chrome 渲染失败(${String(e.message || e).slice(0, 80)})，本号置空（保留快照旧值）`);
-    return { url: `https://shadowbanradar.com/zh/r/${handle}`, text: '', aria: null, viaHttp: false };
+    return { url: `https://shadowbanradar.com/zh/r/${handle}`, text: '', aria: null, viaHttp: null }; // viaHttp:null=通道失败（kimi 复核：false 会被误标成无头Chrome通道）
   }
 }
 

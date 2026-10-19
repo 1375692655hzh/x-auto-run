@@ -26,8 +26,11 @@ try {
   for (const l of fs.readFileSync(logFile, 'utf8').trim().split('\n')) {
     let j; try { j = JSON.parse(l); } catch { continue; }
     if (j.dry || j.simulated || !j.at) continue;
-    // 北京日期过滤（review 抓出：j.at 是 UTC ISO，直接 startsWith(DATE) 会漏 00:00-08:00 的凌晨动作）
-    const bjDay = new Date(Date.parse(j.at) + 8 * 3600000).toISOString().slice(0, 10);
+    // 北京日期过滤（review 抓出：j.at 是 UTC ISO，直接 startsWith(DATE) 会漏 00:00-08:00 的凌晨动作）；
+    // 脏行守卫（kimi 复核抓出：不可解析的 j.at 会让 toISOString 抛 RangeError 被外层 catch 吞掉→当天统计清零）
+    const atMs = Date.parse(j.at);
+    if (!Number.isFinite(atMs)) continue;
+    const bjDay = new Date(atMs + 8 * 3600000).toISOString().slice(0, 10);
     if (bjDay !== DATE) continue;
     if (j.task !== 'executor' || j.action !== 'execute') continue;
     const b = bucket(j.account);
