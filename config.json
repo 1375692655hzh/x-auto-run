@@ -78,34 +78,56 @@
     "maintainers": {
       "butcher": {
         "targets": [
+          "wcixot",
+          "maccostin",
+          "fullwin",
           "owen"
         ],
         "actions": [
           "like",
           "reply"
         ],
-        "fixed": "p2,p3",
-        "note": "10-19 拍板：不随帖侦测，固定进 12:35/19:35 运营窗（maintain-fixed.js 消费 fixed 字段；maintain-watch 侦测跳过带 fixed 的维护号）"
-      },
-      "fullwin": {
-        "targets": [],
-        "actions": [],
-        "enabled": false,
-        "note": "10-19 拍板退出维护矩阵：无运营窗账号（专为维护开窗违背 3+1 收窗方向），且 4 粉小号点赞权重贡献极低；随帖侦测任务已删"
+        "fixed": "p2,p3"
       },
       "wcixot": {
         "targets": [
           "butcher",
+          "maccostin",
+          "fullwin",
           "owen"
         ],
         "actions": [
           "like"
         ],
-        "fixed": "p2,p3",
-        "note": "10-19 拍板：与 butcher 同款固定窗维护（12:35/19:35 运营窗内，不随帖）"
+        "fixed": "p2,p3"
+      },
+      "maccostin": {
+        "targets": [
+          "butcher",
+          "wcixot",
+          "fullwin",
+          "owen"
+        ],
+        "actions": [
+          "like"
+        ],
+        "fixed": "p2,p3"
+      },
+      "fullwin": {
+        "targets": [
+          "butcher",
+          "wcixot",
+          "maccostin",
+          "owen"
+        ],
+        "actions": [
+          "like"
+        ],
+        "fixed": "p2,p3"
       }
     },
-    "quotaNote": "10-20 拍板（kimi 复核建议+用户按推荐跑）：postsPerTargetPerDay=2/目标/天按维护号分账（butcher、wcixot 各自独立额度，不共享不挤占）；同帖去重仍全局（一帖只一号互动，v1.1 M3 防协同保留）；上限语义=每目标最多 2 帖/号/天×2 号=4 帖/天（低于 perTargetDailyCap 5）"
+    "quotaNote": "10-20 拍板（kimi 复核建议+用户按推荐跑）：postsPerTargetPerDay=2/目标/天按维护号分账（butcher、wcixot 各自独立额度，不共享不挤占）；同帖去重仍全局（一帖只一号互动，v1.1 M3 防协同保留）；上限语义=每目标最多 2 帖/号/天×2 号=4 帖/天（低于 perTargetDailyCap 5）",
+    "matrixNote": "10-20 拍板（现在生效）：四自动化号互维护——每号维护自己以外全部四号（含 owen），owen 不维护任何人；固定 p2/p3 窗内执行；分账额度 2帖/目标/号/天 + 每目标总帽5/天 + 每号总帽3/天 + 互吹圈>1/3 跳过 + 同帖只一号"
   },
   "limits": {
     "activeHours": [
