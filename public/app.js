@@ -101,6 +101,32 @@ function renderOverview() {
   }
   h += '</div>';
 
+  // 全账号健康监测（项目级·与账号任务隔离）：雷达四维 + 纯 HTTP 健康指标，5 号全显
+  h += '<div class="card"><h3>全账号健康监测<span style="font-weight:400;font-size:11px;color:#98a5b1">（项目级 · 不属于任何账号的任务 · 雷达每日 09:10 + 健康日检 09:00）</span></h3>';
+  h += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+  h += '<tr style="color:#8a97a3;font-size:10px"><td style="padding:3px 6px">账号</td><td>健康</td><td>雷达分</td><td>幽灵</td><td>降权</td><td>搜索</td><td>建议</td><td>粉丝</td><td>收录</td><td>数据截至</td></tr>';
+  for (var hi = 0; hi < DATA.accounts.length; hi++) {
+    var ha = DATA.accounts[hi];
+    var hv = ha.verdict === 'green' ? '🟢' : ha.verdict === 'suspended' ? '🔴' : '⚪';
+    var rf = ha.radar && ha.radar.four ? ha.radar.four : null;
+    var rs = rf ? (rf.score || '?') : '—';
+    var rg = rf ? (rf.ghost ? (/未见/.test(rf.ghost) ? '✓' : '⚠') : '?') : '—';
+    var rd = rf ? (rf.deboost ? (/未见/.test(rf.deboost) ? '✓' : '⚠') : '?') : '—';
+    var rse = rf ? (rf.search ? (/未见/.test(rf.search) ? '✓' : '⚠') : '?') : '—';
+    var rsu = rf ? (rf.suggestion ? (/未见/.test(rf.suggestion) ? '✓' : '⚠') : '?') : '—';
+    var hfol = ha.metrics[0] && ha.metrics[0].val != null ? ha.metrics[0].val : '—';
+    var hta = ha.dims && ha.dims[1] ? (String(ha.dims[1].st || '').includes('已收录') ? '✓' : String(ha.dims[1].st || '').includes('未收录') ? '✗' : '—') : '—';
+    var hDate = ha.radar && ha.radar.date ? ha.radar.date.slice(5) : (ha.asOf || '—');
+    var rowBg = '';
+    if (rf) { if (!/未见/.test(rf.ghost || '') || !/未见/.test(rf.deboost || '')) rowBg = 'background:#fff3f0'; else if (!/未见/.test(rf.search || '') || !/未见/.test(rf.suggestion || '')) rowBg = 'background:#fffbe8'; }
+    h += '<tr style="border-top:1px solid #f0f3f6;' + rowBg + '"><td style="padding:5px 6px;font-weight:700">' + esc(ha.name) + '</td>';
+    h += '<td>' + hv + '</td><td style="font-weight:' + (parseInt(rs) >= 90 ? '700;color:#1f6e43' : parseInt(rs) >= 70 ? '700;color:#c2761b' : parseInt(rs) < 70 && rs !== '—' ? '700;color:#c0392b' : 'normal') + '">' + rs + '</td>';
+    h += '<td>' + rg + '</td><td>' + rd + '</td><td>' + rse + '</td><td>' + rsu + '</td>';
+    h += '<td>' + hfol + '</td><td>' + hta + '</td><td style="font-size:10px;color:#8a97a3">' + hDate + '</td></tr>';
+  }
+  h += '</table>';
+  h += '<div style="font-size:10px;color:#98a5b1;margin-top:5px">幽灵=回复是否被隐藏 · 降权=回复排序是否被压 · 搜索=搜索结果是否被排除 · 建议=搜索建议是否被移除 · 收录=typeahead 是否收录 · 全部来自每日只读检测（纯 HTTP/借观察者窗口渲染）</div></div>';
+
   // D. 今日节奏条
   h += '<div class="card" style="padding:10px 16px"><div style="font-weight:700;font-size:14px;margin-bottom:8px">今日节奏</div><div style="display:flex;gap:4px;flex-wrap:wrap">';
   var bjNowMin = new Date(Date.now() + 8 * 3600000).toISOString().slice(11, 16);
