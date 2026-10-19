@@ -127,8 +127,9 @@ function digestTypeahead(res, handle) {
 
     const entry = { handle: h, profile: p, statuses: s };
     // 定位（10-19 拍板）：health=纯指标通道（粉丝/关注/发帖数/回复数+suspended 硬事实）；
-    // 健康判定唯一权威=雷达四维（半夜数据窗），typeahead 建议通道已删（fx 不稳致误判，用户拍板）
-    entry.verdict = p.state === 'suspended' ? 'suspended' : 'green';
+    // 健康判定唯一权威=雷达四维（半夜数据窗），typeahead 建议通道已删（fx 不稳致误判，用户拍板）。
+    // fx 拉取失败（state!=ok）不下"绿"结论——显示层失真（review 抓出），显示 unknown 交雷达裁决
+    entry.verdict = p.state === 'suspended' ? 'suspended' : (p.state === 'ok' ? 'green' : 'unknown');
 
     const pv = prev && prev.accounts && prev.accounts[key];
     if (pv) {

@@ -450,11 +450,13 @@ function executeAction(page, entry) {
         if (e.postAt && !ENTRY_ID && Date.parse(e.postAt) > Date.now() + 30000) { continue; } // 未到点：本轮会话不碰（状态保持 planned）
         // 间隔保护=相邻帖 ≥60 秒：不足则顺延等待（而非跳过）——账本时间戳记在尝试时，
         // 批量过期帖紧接着进入循环会被误杀（10-19 实战：butcher 白丢 2 条）；等待上限 90 秒，超出仍跳过
+        // 账本已 filter(Number.isFinite)，lastPost 恒为有限数或 0
         const lastPost = Math.max(0, ...((LEDGER.actions.post || []).filter(Number.isFinite)));
-        if (lastPost) {
+        if (lastPost > 0) {
           const gapLeft = 60 * 1000 - (Date.now() - lastPost);
-          if (gapLeft > 90 * 1000) { e.status = 'skipped'; e.result = `距上一条原创帖过近且积压过久(>${Math.round(gapLeft / 60000)}min)`; stats.skipped.push(e.id); continue; }
-          if (gapLeft > 0) await sleep(gapLeft);
+          // review 抓出：原 ">90s 跳过"分支在 lastPost 为过去时间时永不可达（gapLeft≤60s）；
+          // 实际风险只有账本脏数据（lastPost 在未来）——那时最多等 90 秒，不再跳过（跳过=白丢帖）
+          if (gapLeft > 0) await sleep(Math.min(gapLeft, 90 * 1000));
         }
       }
 

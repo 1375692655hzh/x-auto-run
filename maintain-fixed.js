@@ -69,16 +69,22 @@ async function fetchOwnPosts(handle) {
   const me = acctByKey[ACCOUNT];
   if (!me) { console.error('config.accounts 无此账号'); process.exit(1); }
 
-  // 维护号自身熔断 + 日帽
+  // 队列文件先读：id 基数取现有长度（防同窗重跑撞 id——review P1-1）；条目前插（review P0-1：尾插在
+  // 25min 会话死线下轮不到维护条目，且台账已预扣当天不可补——前插保证点赞类快动作先执行）
+  const qFile = path.join(QUEUE_DIR, `${today()}-${WINDOW}-${ACCOUNT}.json`);
+  const q = readJson(qFile, []);
+  const qLen = Array.isArray(q) ? q.length : 0;
+  const nextId = (n) => `${today()}-${WINDOW}-maint-${qLen + n}`;
+
+  // 维护号自身熔断 + 日帽（帽在目标循环内逐次复查——review P2-7：like+reply 各扣 1，两目标可越帽）
+  const capLeft = () => (M.perMaintainerDailyCap || 3) - loadMLed().filter((e) => e.account === ACCOUNT && e.at.slice(0, 10) === today()).length;
   const ro = radarOk(me.handle);
   if (!ro.ok) { audit({ account: ACCOUNT, window: WINDOW, action: 'skip', note: '维护号熔断: ' + ro.why }); console.error('维护号熔断: ' + ro.why); process.exit(0); }
-  if (loadMLed().filter((e) => e.account === ACCOUNT && e.at.slice(0, 10) === today()).length >= (M.perMaintainerDailyCap || 3)) {
-    audit({ account: ACCOUNT, window: WINDOW, action: 'skip', note: '维护号日帽已满' }); console.log('维护号日帽已满，本窗不做'); process.exit(0);
-  }
 
   const entries = [];
   const notes = [];
   for (const tKey of mCfg.targets || []) {
+    if (capLeft() <= 0) { notes.push('维护号日帽已满，后续目标不做'); break; }
     const tAcct = acctByKey[tKey];
     if (!tAcct) continue;
     const posts = await fetchOwnPosts(tAcct.handle);
@@ -97,31 +103,31 @@ async function fetchOwnPosts(handle) {
     const natural = (p.likes || 0) + (p.replies || 0);
     if (1 / Math.max(natural, 1) > (M.dominanceRatio || 0.34)) { notes.push(`帖${p.statusId.slice(-6)} 自然互动${natural}，维护会超1/3，跳过`); continue; }
     const base = { kind: 'maintain', fixed: true, statusId: p.statusId, postUrl: `https://x.com/${tAcct.handle}/status/${p.statusId}`, targetHandle: tAcct.handle, postAt: p.postAt, createdAt: nowIso(), status: 'planned', window: WINDOW };
-    entries.push({ id: `${today()}-${WINDOW}-maint-${entries.length + 1}`, account: ACCOUNT, type: 'like', ...base });
+    entries.push({ id: nextId(entries.length + 1), account: ACCOUNT, type: 'like', ...base });
     appendMLed({ account: ACCOUNT, action: 'like', statusId: p.statusId, targetHandle: tAcct.handle, window: WINDOW });
+    let hasReply = false; // 逐目标标志（review P2-8：全数组 some 会把别的目标的回复算进来）
     // 低频回复规则不变：48h 间隔 + 自然互动≥5，LLM+质量门失败不凑数
     const lastReply = loadMLed().filter((e) => e.account === ACCOUNT && e.action === 'reply' && e.targetHandle === tAcct.handle);
-    if ((mCfg.actions || []).includes('reply') && Date.now() - (lastReply.length ? Date.parse(lastReply[lastReply.length - 1].at) : 0) > (M.replyMinGapHours || 48) * 3600000 && natural >= 5) {
+    if (capLeft() > 0 && (mCfg.actions || []).includes('reply') && Date.now() - (lastReply.length ? Date.parse(lastReply[lastReply.length - 1].at) : 0) > (M.replyMinGapHours || 48) * 3600000 && natural >= 5) {
       const persona = (CFG.personas || {})[ACCOUNT];
       const brief = ((CFG.prompts || {}).visit || '') + '\n这是权重维护场景：对被维护账号的新帖做一条真诚、有信息量的回应。';
       const r = await generateReply({ post: p.text, author: tAcct.handle, persona, brief }).catch(() => null);
       const qc = r && r.text ? quality.check(r.text, {}) : null;
       if (qc && qc.ok) {
-        entries.push({ id: `${today()}-${WINDOW}-maint-${entries.length + 1}`, account: ACCOUNT, type: 'reply', text: qc.cleaned, ...base });
+        entries.push({ id: nextId(entries.length + 1), account: ACCOUNT, type: 'reply', text: qc.cleaned, ...base });
         appendMLed({ account: ACCOUNT, action: 'reply', statusId: p.statusId, targetHandle: tAcct.handle, window: WINDOW });
+        hasReply = true;
       } else notes.push(`帖${p.statusId.slice(-6)} 回复生成未过质量门(${qc ? qc.reason : 'LLM失败'})，只点赞`);
     }
-    notes.push(`帖${p.statusId.slice(-6)} → ${ACCOUNT} 点赞${entries.some((x) => x.type === 'reply') ? '+回复' : ''}（自然互动${natural}，帖龄${Math.round((now - p.postAt) / 60000)}min）`);
+    notes.push(`帖${p.statusId.slice(-6)} → ${ACCOUNT} 点赞${hasReply ? '+回复' : ''}（自然互动${natural}，帖龄${Math.round((now - p.postAt) / 60000)}min）`);
   }
 
   if (!entries.length) { audit({ account: ACCOUNT, window: WINDOW, action: 'none', note: notes.join('；') || '无候选' }); console.log(notes.join('\n') || '无候选帖'); process.exit(0); }
-  if (DRY) { console.log('[DRY] 应追加进运营窗队列：'); entries.forEach((e) => console.log(' ', e.id, e.type, e.targetHandle)); process.exit(0); }
+  if (DRY) { console.log('[DRY] 应前插进运营窗队列：'); entries.forEach((e) => console.log(' ', e.id, e.type, e.targetHandle)); process.exit(0); }
 
-  // 追加进当轮运营窗队列（同会话 executor 消费——一次开窗全做完）
-  const qFile = path.join(QUEUE_DIR, `${today()}-${WINDOW}-${ACCOUNT}.json`);
-  const q = readJson(qFile, []);
-  writeJson(qFile, q.concat(entries));
+  // 前插进当轮运营窗队列（同会话 executor 按文件顺序消费，维护点赞是快动作，确保在 25min 死线内执行）
+  writeJson(qFile, entries.concat(q));
   audit({ account: ACCOUNT, window: WINDOW, action: 'enqueue', count: entries.length, queue: path.basename(qFile), note: notes.join('；') });
   console.log(notes.join('\n'));
-  console.log(`已追加 ${entries.length} 条维护条目 → ${path.basename(qFile)}（本轮 executor 同会话消费）`);
+  console.log(`已前插 ${entries.length} 条维护条目 → ${path.basename(qFile)}（本轮 executor 优先消费）`);
 })().catch((e) => { console.error(e.message || e); process.exit(1); });

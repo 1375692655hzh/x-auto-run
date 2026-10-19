@@ -25,17 +25,21 @@ function bucket(key) {
 try {
   for (const l of fs.readFileSync(logFile, 'utf8').trim().split('\n')) {
     let j; try { j = JSON.parse(l); } catch { continue; }
-    if (j.dry || j.simulated || !j.at || !j.at.startsWith(DATE)) continue;
+    if (j.dry || j.simulated || !j.at) continue;
+    // 北京日期过滤（review 抓出：j.at 是 UTC ISO，直接 startsWith(DATE) 会漏 00:00-08:00 的凌晨动作）
+    const bjDay = new Date(Date.parse(j.at) + 8 * 3600000).toISOString().slice(0, 10);
+    if (bjDay !== DATE) continue;
     if (j.task !== 'executor' || j.action !== 'execute') continue;
     const b = bucket(j.account);
     if (j.status === 'unknown') { b.unknown.push(`${(j.id || '').slice(11)} ${j.type}${j.note ? '：' + String(j.note).slice(0, 40) : ''}`); continue; }
     if (j.status === 'failed') { b.failed.push(`${(j.id || '').slice(11)} ${String(j.note || '').slice(0, 40)}`); continue; }
     if (j.status !== 'done') continue;
+    // kind 优先于 type 判分支（review 抓出：followback-reply 是 type=follow，排在 kind 前会被误计入关注帖主）
     if (j.kind === 'maintain') b.maintain += 1;
     else if (j.type === 'post') { b.post += 1; b.postTimes.push(j.at); }
+    else if (j.kind === 'followback-reply' || j.kind === 'followback') b.followback += 1;
     else if (j.type === 'follow') b.follow += 1;
     else if (j.kind === 'community') b.community += 1;
-    else if (j.kind === 'followback-reply' || j.kind === 'followback') b.followback += 1;
     else if (j.kind === 'visit') b.visit += 1;
   }
 } catch { }
@@ -52,15 +56,15 @@ const { snap, day: snapDay } = pickSnap();
 const ySnap = readJson(path.join(STATE_DIR, 'health-snapshots', `${new Date(Date.parse(DATE) - 86400000).toISOString().slice(0, 10)}.json`));
 
 // ── 每号一段 ─────────────────────────────────────────────
-const RQ = (key) => Object.assign({}, CFG.rounds.quotas, ((CFG.rounds || {}).quotasByAccount || {})[key] || {});
-const sumQ = (key, kind) => Object.values(RQ(key)[kind] || {}).reduce((s, x) => s + (x || 0), 0);
 const runAccounts = (CFG.accounts || []).filter((a) => a.role === 'run');
 
 const sections = runAccounts.map((a) => {
   const b = stats[a.key] || bucket(a.key);
-  const q = RQ(a.key);
+  const own = ((CFG.rounds || {}).quotasByAccount || {})[a.key] || {};
+  const sumOwn = (kind) => Object.values(own[kind] || {}).reduce((s, x) => s + (x || 0), 0);
   const lines = [];
-  lines.push(`- 完成量：互关评论 ${b.community}/${sumQ(a.key, 'community')} · 条件回关 ${b.followback}/${sumQ(a.key, 'replyFollowBack')} · 串门 ${b.visit}/${sumQ(a.key, 'visit')} · 原创发帖 ${b.post}（区间 8~18）· 权重维护 ${b.maintain}/≤3 · 关注帖主 ${b.follow}`);
+  // 分母只认每号自己拍板的量（review 抓出：全局回退会让 fullwin 显示 0/25、maccostin 显示 0/10 串门）
+  lines.push(`- 完成量：互关评论 ${b.community}${own.community ? '/' + sumOwn('community') : '（未配置）'} · 条件回关 ${b.followback}（无任务上限） · 串门 ${b.visit}${own.visit ? '/' + sumOwn('visit') : '（未配置）'} · 原创发帖 ${b.post}（区间 8~18）· 权重维护 ${b.maintain}/≤3 · 关注帖主 ${b.follow}`);
   // 粉丝
   const e = snap && snap.accounts && snap.accounts[a.key];
   const yE = ySnap && ySnap.accounts && ySnap.accounts[a.key];

@@ -58,14 +58,15 @@ async function fetchResult(handle) {
 //    "正在计算"加载态——实测该站判定计算必须跑 JS）才启用。全新临时配置、零 Cookie、
 //    与任何比特浏览器账号窗口无关。
 let chromeBrowser = null;
+let chromeTmpDir = null;
 async function renderInChrome(handle) {
   const puppeteer = require('puppeteer-core');
   const chromePath = RC.chromePath || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
   if (!chromeBrowser) {
     const os = require('os');
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'radar-chrome-'));
+    chromeTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'radar-chrome-'));
     chromeBrowser = await puppeteer.launch({
-      executablePath: chromePath, headless: 'new', userDataDir: tmpDir,
+      executablePath: chromePath, headless: 'new', userDataDir: chromeTmpDir,
       args: ['--no-first-run', '--no-default-browser-check', '--disable-blink-features=AutomationControlled', '--lang=zh-CN'],
     });
   }
@@ -87,16 +88,26 @@ async function renderInChrome(handle) {
     return { url: page.url(), text, aria, viaHttp: false };
   } finally { try { await page.close(); } catch { } }
 }
-async function closeChrome() { if (chromeBrowser) { try { await chromeBrowser.close(); } catch { } chromeBrowser = null; } }
+async function closeChrome() {
+  if (chromeBrowser) { try { await chromeBrowser.close(); } catch { } chromeBrowser = null; }
+  // 临时 profile 清理（review 抓出：异常退出会残留 mkdtemp 目录）
+  if (chromeTmpDir) { try { fs.rmSync(chromeTmpDir, { recursive: true, force: true }); } catch { } chromeTmpDir = null; }
+}
 
 // 单号取结果：HTTP 直取（快）→ 判定形 aria 不成立才落无头 Chrome 渲染
+// 单号全链失败不冒泡（review 抓出：一个号抛错会连坐后续号+快照不写+Chrome 残留）——返回空结果走合并保旧值
 async function getResult(handle) {
   try {
-    const r = await fetchResult(handle);
-    if (ariaIsVerdict(r.aria)) return r;
-    console.log(`  @${handle} HTTP 直取为加载态（无缓存终值），转无头 Chrome 渲染…`);
-  } catch (e) { console.log(`  @${handle} HTTP 直取失败(${e.message.slice(0, 60)})，转无头 Chrome 渲染…`); }
-  return renderInChrome(handle);
+    try {
+      const r = await fetchResult(handle);
+      if (ariaIsVerdict(r.aria)) return r;
+      console.log(`  @${handle} HTTP 直取为加载态（无缓存终值），转无头 Chrome 渲染…`);
+    } catch (e) { console.log(`  @${handle} HTTP 直取失败(${e.message.slice(0, 60)})，转无头 Chrome 渲染…`); }
+    return await renderInChrome(handle);
+  } catch (e) {
+    console.log(`  @${handle} 无头 Chrome 渲染失败(${String(e.message || e).slice(0, 80)})，本号置空（保留快照旧值）`);
+    return { url: `https://shadowbanradar.com/zh/r/${handle}`, text: '', aria: null, viaHttp: false };
+  }
 }
 
 // 解析四维度：优先 aria-label（"搜索建议限制: 未见限制, …"），无 aria 时退回文本正则
@@ -159,4 +170,4 @@ function parseFour(text, aria) {
     fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: new Date().toISOString(), task: 'radar', account: 'butcher', action: 'check', note: RC.handles.join(',') + ' 四维度判定' }) + '\n');
     console.log(`\n已写入 ${p} 的 radar 字段`);
   }
-})().catch((e) => { console.error(e.message || e); process.exit(1); });
+})().catch(async (e) => { await closeChrome().catch(() => { }); console.error(e.message || e); process.exit(1); });

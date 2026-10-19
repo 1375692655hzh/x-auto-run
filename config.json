@@ -262,7 +262,7 @@
       "p1": {
         "time": "09:35",
         "modes": "pull,community,replyfollowback,visit,post",
-        "note": "10-19 拍板 butcher 收成 3+1：运营窗①=一次开窗全做（拉取+互关+条件回关+串门+发帖）。wcixot 仍走发布窗窄模式——其 bat 显式 --modes pull,visit,post 锁定，不受本配置影响"
+        "note": "10-19 拍板 butcher 收成 3+1：运营窗①=一次开窗全做（拉取+互关+条件回关+串门+发帖）。10-20 起四号共用本窗表：butcher/wcixot 全模式（bat 不带 --modes 走此配置）；maccostin bat 锁 pull,community,replyfollowback,post；fullwin bat 锁 pull,post"
       },
       "p2": {
         "time": "12:35",
