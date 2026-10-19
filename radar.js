@@ -1,17 +1,18 @@
-// radar.js — shadowbanradar.com 限流雷达（浏览器渲染通道）：读取 /zh/r/<handle> 结果页的四维度判定
+// radar.js — shadowbanradar.com 限流雷达：读取 /zh/r/<handle> 结果页的四维度判定
 // 用法:
-//   node radar.js --dump                    渲染 butcher 结果页，打印可见文本（探测 DOM 用）
-//   node radar.js --check                   渲染 + 解析四维度 → 写入 state/health-snapshots/<今日>.json 的 radar 字段
-// 设计: 用中性窗口（config.radar.profileId，默认 WCixot 油管窗口）渲染，不用 butcher 窗口——
-//       避免把执行号 Cookie 与检测站关联；纯只读浏览，不点任何按钮。
-const puppeteer = require('puppeteer-core');
+//   node radar.js --dump                    打印 MarketButcher88 结果页可见文本（探测用）
+//   node radar.js --check                   拉取 + 解析四维度 → 写入 state/health-snapshots/<今日>.json 的 radar 字段
+// 设计（10-19 拍板改版）: **纯 HTTP 直取结果页，零窗口零 Cookie**——实测结果页是服务端渲染，
+//       四维度判定全文在唯一一个 aria-label 里机器可读；此前"必须真浏览器渲染"的结论只对 /api/scan
+//       触发端点成立（反爬挑战），结果页直取 200 全文直出。项目级任务，不依赖任何比特浏览器窗口。
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
 const STATE_DIR = path.join(ROOT, 'state');
-const RC = Object.assign({ profileId: '9271f8e085944b0a8a6685aa19e8b2f7', handles: ['MarketButcher88', 'Owenwin888'], waitMs: 12000 }, CFG.radar || {});
+const RC = Object.assign({ handles: ['MarketButcher88', 'Owenwin888'], waitMs: 12000 }, CFG.radar || {});
+delete RC.profileId; // 已废：不再使用任何比特浏览器窗口（防旧配置误导）
 
 const argv = process.argv.slice(2);
 const DUMP = argv.includes('--dump');
@@ -28,53 +29,80 @@ function radarChecksToday() {
   } catch { return 0; }
 }
 
-async function openWindow(profileId) {
-  const j = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: profileId }) }).then((r) => r.json());
-  if (!j.success) throw new Error('开窗失败: ' + JSON.stringify(j));
-  return j.data.ws;
+// 判定形 aria 校验：必须是"维度: 结论"对；加载态清单（"正在计算/ [2/4]/请启用JS"）不算
+const ariaIsVerdict = (a) => !!a && /[:：]/.test(a) && !/正在计算|\[\d+\/4\]|请启用/i.test(a);
+
+async function fetchResult(handle) {
+  const url = `https://shadowbanradar.com/zh/r/${handle}`;
+  const r = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    }, signal: AbortSignal.timeout(20000),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status} (${handle})`);
+  const html = await r.text();
+  // 四维度判定全文在唯一一个 aria-label 里（与旧浏览器版同一通道，parseFour 无需改动）
+  const ariaRaw = (html.match(/aria-label="([^"]*搜索建议限制[^"]*)"/) || html.match(/aria-label="([^"]*Search suggestion[^"]*)"/) || [])[1] || null;
+  const aria = ariaRaw ? ariaRaw.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'") : null;
+  // 去标签得近似可见文本（score/账号龄正则复用）
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  return { url, text, aria, viaHttp: true };
 }
 
-async function renderResult(handle) {
-  const ws = await openWindow(RC.profileId);
-  try {
-    const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
-    const page = await browser.newPage();
-    try {
-      await page.setViewport({ width: 1366 + Math.floor(Math.random() * 60), height: 900 });
-      await page.goto(`https://shadowbanradar.com/zh/r/${handle}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await sleep(RC.waitMs); // 等 SPA 渲染 + 数据拉取
-      const text = await page.evaluate(() => (document.body.innerText || '').replace(/\n{3,}/g, '\n\n'));
-      // 官方 aria 通道：容器 aria-label 含四维度判定全文（机器可读，比图标可靠）
-      const aria = await page.evaluate(() => {
-        const el = document.querySelector('[aria-label*="搜索建议限制"], [aria-label*="Search suggestion"]');
-        return el ? el.getAttribute('aria-label') : null;
-      }).catch(() => null);
-      // DOM 探针：四维度条目与其父节点的类名/aria（状态多为图标，靠类名或 aria 判通过与否）
-      const domInfo = await page.evaluate(() => {
-        const labels = ['搜索建议', '搜索', '回复隐藏', '回复'];
-        const out = [];
-        for (const el of document.querySelectorAll('li,div,section')) {
-          const t = (el.textContent || '').trim();
-          if (t.length > 30 || !t) continue;
-          if (labels.some((l) => t === l || t.startsWith(l))) {
-            const cls = [el.className, el.parentElement && el.parentElement.className].filter(Boolean).join(' | ').slice(0, 120);
-            const aria = el.getAttribute('aria-label') || (el.parentElement && el.parentElement.getAttribute('aria-label')) || '';
-            const svg = el.querySelector('svg') ? 'svg:' + ([...el.querySelectorAll('svg')].map((s) => s.getAttribute('class')).join(',')) : '';
-            out.push({ text: t.slice(0, 20), cls, aria, svg });
-          }
-        }
-        return out.slice(0, 12);
-      }).catch(() => []);
-      const url = page.url();
-      await page.close();
-      return { url, text, aria };
-    } finally { await browser.disconnect(); }
-  } finally {
-    await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: RC.profileId }) }).catch(() => { });
+// ── 本机无头 Chrome 通道（10-19 拍板项目级）：仅当 HTTP 直取拿不到终值（缓存过期、页面处于
+//    "正在计算"加载态——实测该站判定计算必须跑 JS）才启用。全新临时配置、零 Cookie、
+//    与任何比特浏览器账号窗口无关。
+let chromeBrowser = null;
+async function renderInChrome(handle) {
+  const puppeteer = require('puppeteer-core');
+  const chromePath = RC.chromePath || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+  if (!chromeBrowser) {
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'radar-chrome-'));
+    chromeBrowser = await puppeteer.launch({
+      executablePath: chromePath, headless: 'new', userDataDir: tmpDir,
+      args: ['--no-first-run', '--no-default-browser-check', '--disable-blink-features=AutomationControlled', '--lang=zh-CN'],
+    });
   }
+  const page = await chromeBrowser.newPage();
+  try {
+    await page.setExtraHTTPHeaders({ 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' });
+    await page.goto(`https://shadowbanradar.com/zh/r/${handle}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    // 等判定容器出现（加载态会先渲染清单占位，终值 aria 由前端轮询补上）
+    await page.waitForFunction(() => {
+      const el = document.querySelector('[aria-label*="搜索建议限制"], [aria-label*="Search suggestion"]');
+      const a = el && el.getAttribute('aria-label') || '';
+      return /[:：]/.test(a) && !/正在计算|\[\d+\/4\]|请启用/i.test(a);
+    }, { timeout: 90000, polling: 2000 }).catch(() => { });
+    const aria = await page.evaluate(() => {
+      const el = document.querySelector('[aria-label*="搜索建议限制"], [aria-label*="Search suggestion"]');
+      return el ? el.getAttribute('aria-label') : null;
+    }).catch(() => null);
+    const text = await page.evaluate(() => (document.body.innerText || '').replace(/\n{3,}/g, '\n\n')).catch(() => '');
+    return { url: page.url(), text, aria, viaHttp: false };
+  } finally { try { await page.close(); } catch { } }
+}
+async function closeChrome() { if (chromeBrowser) { try { await chromeBrowser.close(); } catch { } chromeBrowser = null; } }
+
+// 单号取结果：HTTP 直取（快）→ 判定形 aria 不成立才落无头 Chrome 渲染
+async function getResult(handle) {
+  try {
+    const r = await fetchResult(handle);
+    if (ariaIsVerdict(r.aria)) return r;
+    console.log(`  @${handle} HTTP 直取为加载态（无缓存终值），转无头 Chrome 渲染…`);
+  } catch (e) { console.log(`  @${handle} HTTP 直取失败(${e.message.slice(0, 60)})，转无头 Chrome 渲染…`); }
+  return renderInChrome(handle);
 }
 
 // 解析四维度：优先 aria-label（"搜索建议限制: 未见限制, …"），无 aria 时退回文本正则
+// 值校验（10-19）：结论必须含 未见/检测到/正常 类字样——栏目标签、加载态清单不得当判定
+// （实战：站点"暂时无法访问 X 数据"时页面只剩栏目骨架，曾把"搜索建议限制"标签当结论写入快照触发红告警）
+const isVerdictValue = (v) => v && /未见|检测到|正常|not detected|detected/i.test(v);
 function parseFour(text, aria) {
   const out = { suggestion: null, search: null, ghost: null, deboost: null };
   if (aria) {
@@ -82,6 +110,7 @@ function parseFour(text, aria) {
       const m = part.match(/^\s*([^:：]+)[:：]\s*(.+?)\s*$/);
       if (!m) continue;
       const [k, v] = [m[1], m[2]];
+      if (!isVerdictValue(v)) continue;
       if (/搜索建议|suggestion/i.test(k)) out.suggestion = v;
       else if (/搜索|search/i.test(k) && !/建议|suggestion/i.test(k)) out.search = v;
       else if (/回复隐藏|ghost/i.test(k)) out.ghost = v;
@@ -89,7 +118,7 @@ function parseFour(text, aria) {
     }
   } else {
     const map = [['suggestion', /搜索建议[^\n]*/], ['search', /搜索封禁|搜索限制[^\n]*/], ['ghost', /幽灵封禁|回复隐藏[^\n]*/], ['deboost', /回复降权|回复排序[^\n]*/]];
-    for (const [key, re] of map) { const m = text.match(re); out[key] = m ? m[0].slice(0, 120) : null; }
+    for (const [key, re] of map) { const m = text.match(re); out[key] = m && isVerdictValue(m[0]) ? m[0].slice(0, 120) : null; }
   }
   const score = (text.match(/(\d+)\s*\/\s*100/) || [])[1] || null;
   const verdict = (text.match(/未检测到限流|检测到限流/) || [])[0] || null;
@@ -103,14 +132,15 @@ function parseFour(text, aria) {
   if (CHECK && usedToday >= 10) { console.error(`雷达日额度护栏：今日已 ${usedToday} 次检查（上限 10），拒跑`); process.exit(1); }
   const results = {};
   for (const h of RC.handles) {
-    const r = await renderResult(h);
-    console.log(`\n===== @${h}（${r.url}）=====`);
+    const r = await getResult(h);
+    console.log(`\n===== @${h}（${r.url}，${r.viaHttp ? 'HTTP直取' : '无头Chrome'}）=====`);
     if (DUMP) console.log(r.text.slice(0, 2600));
-    const four = parseFour(r.text, r.aria);
-    results[h] = { url: r.url, four, ariaRaw: r.aria };
+    const four = parseFour(r.text, ariaIsVerdict(r.aria) ? r.aria : null); // 加载态 aria 一律不当判定喂给解析器（10-19：曾把"正在计算"清单文本当判定写入快照）
+    results[h] = { url: r.url, four, ariaRaw: ariaIsVerdict(r.aria) ? r.aria : null };
     console.log(JSON.stringify(four));
     await sleep(3000);
   }
+  await closeChrome();
   if (CHECK) {
     const p = path.join(STATE_DIR, 'health-snapshots', `${today()}.json`);
     let snap = {};

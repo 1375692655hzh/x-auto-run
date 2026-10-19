@@ -61,7 +61,7 @@ function opsRows(w, t) {
   return rows;
 }
 const TASK_ROWS = [
-  { id: 'nightChain', t: '03:20', cat: '系统运维', name: '半夜数据窗（一条链）', unit: '次', status: 'on', set: '1 次/天·凌晨2-5点窗（+随机0-90min）', setNum: 1, sug: '1/天：互关粉丝占比全量扫描+雷达四维度+关系池通知扫描合并为一条链（10-19 拍板 3+1 收窗）', desc: 'followers-scan（各号自己窗口只读翻粉丝）→ radar --check（5号四维，中性窗口）→ contacts --build+--scan --night（butcher 通知页）；产出清晨全部就绪' },
+  { id: 'nightChain', t: '03:20', cat: '系统运维', name: '半夜数据窗（一条链）', unit: '次', status: 'on', set: '1 次/天·凌晨2-5点窗（+随机0-90min）', setNum: 1, sug: '1/天：互关粉丝占比全量扫描+雷达四维度+关系池通知扫描合并为一条链（10-19 拍板 3+1 收窗）', desc: 'followers-scan（各号自己窗口只读翻粉丝）→ radar --check（**项目级，零账号窗口**：HTTP 直取结果页优先，无缓存终值才起本机无头 Chrome；站点临时故障时该号置空不告警，次日自动重试）→ contacts --build+--scan --night（butcher 通知页）；产出清晨全部就绪' },
   { id: 'health', t: '09:00', cat: '系统运维', name: '健康日检', unit: '次', status: 'on', set: '1 次', setNum: 1, sug: '1/天（radar 方法论：四项检测每日至少一检）', desc: 'FxTwitter 匿名三通道，喂六宫格/两图' },
   { id: 'owen', t: '10:00', cat: '主动互动', name: 'Owen帖加持（外部任务）', unit: '帖', status: 'paused', set: '2 帖（旧拍板）', setNum: 2, sug: '≤2/天（外部任务维持旧档；X算法：直接导航不计推荐权重，仅关系维护价值）', desc: '外部 boost.js 任务：满45分钟新帖四连——**已退役**（10-17，接替者=权重维护互动行；ZCode 旧轮 10-18 已删除）' },
   { id: 'graph', t: '10:00', cat: '主动互动', name: '图谱点赞（外部任务）', unit: '赞', status: 'paused', set: '2 赞/轮（旧拍板）', setNum: null, sug: '点赞类合计≤20/天（XActions 50-100/天档，我们取约1/3更保守）', desc: '@' + (G0.handle || '?') + ' + @antiAIvo 随机点赞（只赞不评）——已随 boost.js 退役（10-17），能力未迁移，复活需拍板' },
