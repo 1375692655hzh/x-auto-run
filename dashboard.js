@@ -32,6 +32,7 @@ const Q = ((CFG.rounds || {}).quotas) || {};
 const QB = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).butcher) || Q; // butcher 实际配额（10-19 三运营窗 9+8+8 / 7+7+6）
 const QW = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).wcixot) || Q; // wcixot 实际配额
 const QM = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).maccostin) || Q; // maccostin 实际配额（10-19 接入：互关=butcher 减半）
+const QF = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).fullwin) || Q; // fullwin 实际配额（10-20 接入：仅发布，无互关无串门）
 function windowRows(w, t, QX, who) { // 互关窗行（10-19 起四窗 8:30/13/16/20 仅 wcixot 在跑）
   const f = (m) => (((m || {})[w] != null) ? m[w] : null);
   return [
@@ -50,10 +51,10 @@ function windowRows(w, t, QX, who) { // 互关窗行（10-19 起四窗 8:30/13/1
 function opsRows(w, t, who, QX, opts = {}) {
   const f = (m) => (((m || {})[w] != null) ? m[w] : null);
   const rows = [];
-  rows.push({ id: `community:${w}`, t, cat: '社区互关', name: `互关评论·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '条', status: 'on', set: `${f(QX.community)} 条（你拍板 10-19 三窗分配）`, setNum: f(QX.community), sug: '≤10/天=低风险；20-50/天=高风险档（XActions 分档；已如实告知）',
+  if (opts.community !== false) rows.push({ id: `community:${w}`, t, cat: '社区互关', name: `互关评论·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '条', status: 'on', set: `${f(QX.community)} 条（你拍板 10-19 三窗分配）`, setNum: f(QX.community), sug: '≤10/天=低风险；20-50/天=高风险档（XActions 分档；已如实告知）',
     desc: '运营窗内一次开窗连做：拉取→互关→条件回关→串门→定时发帖' });
-  rows.push({ id: `follow:${w}`, t, cat: '社区互关', name: `关注帖主·运营窗${WL[w]}`, unit: '人', status: 'on', set: '随互关评论 1:1 产生', setNum: null, sug: '日上限=滚动关注帽（XActions 分档；官方400/天硬顶）', desc: '每条互关评论自动先关注帖主（画像筛选）' });
-  rows.push({ id: `followReply:${w}`, t, cat: '社区互关', name: `条件回关·运营窗${WL[w]}`, unit: '人', status: 'on', set: '无任务上限（10-19 拍板全账号：回复+关注双条件满足即回）', setNum: null, sug: '真实约束=候选条件+滚动关注帽（引擎安全网）', desc: '半夜链通知扫描喂候选；窗内满足条件即回' });
+  if (opts.community !== false) rows.push({ id: `follow:${w}`, t, cat: '社区互关', name: `关注帖主·运营窗${WL[w]}`, unit: '人', status: 'on', set: '随互关评论 1:1 产生', setNum: null, sug: '日上限=滚动关注帽（XActions 分档；官方400/天硬顶）', desc: '每条互关评论自动先关注帖主（画像筛选）' });
+  if (opts.community !== false) rows.push({ id: `followReply:${w}`, t, cat: '社区互关', name: `条件回关·运营窗${WL[w]}`, unit: '人', status: 'on', set: '无任务上限（10-19 拍板全账号：回复+关注双条件满足即回）', setNum: null, sug: '真实约束=候选条件+滚动关注帽（引擎安全网）', desc: '半夜链通知扫描喂候选；窗内满足条件即回' });
   const BA = ((CFG.posts || {}).budgetByAccount || {})[who || 'butcher'] || ((CFG.posts || {}).budget) || {};
   const a = (BA.windowAllocation || {})[w];
   const fmt = (x) => (x != null && typeof x === 'object' ? `${x.min}~${x.max}` : String(x ?? 0));
@@ -77,6 +78,9 @@ const TASK_ROWS = [
   ...opsRows('p1', '09:35', 'maccostin', QM, { visit: false, maintain: false }),
   ...opsRows('p2', '12:35', 'maccostin', QM, { visit: false, maintain: false }),
   ...opsRows('p3', '19:35', 'maccostin', QM, { visit: false, maintain: false }),
+  ...opsRows('p1', '09:35', 'fullwin', QF, { community: false, visit: false, maintain: false }),
+  ...opsRows('p2', '12:35', 'fullwin', QF, { community: false, visit: false, maintain: false }),
+  ...opsRows('p3', '19:35', 'fullwin', QF, { community: false, visit: false, maintain: false }),
   { id: 'maintain', t: '12:35/19:35 窗内', cat: '主动互动', name: '权重维护互动（统一固定窗）', unit: '次', status: 'on', set: '≤1 帖/目标/窗 · ≤3 次/号/天（v1.1 拍板）', setNum: null, sug: '维护计入当日点赞/回复总帽', desc: '10-19 拍板收编：随帖侦测任务已删（黄金窗时序让位于开窗节奏），全部维护并进 p2/p3 运营窗（butcher→owen、wcixot→butcher+owen）；fullwin 退出矩阵（无运营窗账号，4粉小号贡献极低）' },
   { id: 'verifyReply', t: '已下线', cat: '系统运维', name: '回复可见性抽查（已下线）', unit: '次', status: 'off', set: '—', setNum: null, sug: '—', desc: '10-19 拍板下线：走 FxTwitter 路径不稳定易误判，回复可见性以雷达四维（ghost/deboost 两维即回复可见性检测）为准，每晚 03:20 半夜数据窗' },
   { id: 'passive', t: '随通知', cat: '被动回复', name: '回复他人的回复', unit: '', status: 'pending', set: '不限（你拍板）', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '别人在我们帖下的回复→回应；评论模块待接入' },
