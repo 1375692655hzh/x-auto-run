@@ -323,7 +323,7 @@ function buildData() {
       { label: '互关评论', unit: '条', done: sumWin('community'), planned: planWin(RQA.community), plannedText: String(planWin(RQA.community)), note: '三运营窗合计（拍板' + planWin(RQA.community) + '/天）' },
       { label: '关注帖主', unit: '人', done: sumWin('follow'), planned: null, plannedText: '随互关 1:1', note: '条件行事：每条互关评论自动先关注（非按量任务，无目标量）' },
       { label: '条件回关', unit: '人', done: sumWin('followReply'), planned: null, plannedText: '无任务上限', note: '10-19 拍板全账号：回复+关注双条件满足即回；唯一约束=滚动关注帽（引擎安全网非任务量）' },
-      { label: '关系串门', unit: '条', done: sumWin('visit'), planned: planWin(RQA.visit), plannedText: String(planWin(RQA.visit)), note: '三运营窗合计（拍板上限：butcher 10/wcixot 20，按关系池实有人数自然衰减）' },
+      { label: '关系串门', unit: '条', done: sumWin('visit'), planned: (((((CFG.rounds || {}).quotasByAccount || {})[a.key] || {}).visit) ? planWin(RQA.visit) : null), plannedText: ((((CFG.rounds || {}).quotasByAccount || {})[a.key] || {}).visit) ? String(planWin(RQA.visit)) : '未配置（新号轻装）', note: '三运营窗合计（拍板上限：butcher 10/wcixot 20，按关系池实有人数自然衰减）' },
       { label: '原创发布', unit: '帖', done: sumWin('post'), planned: null, plannedText: '8~18/天（区间随机）', note: '10-18 你拍板：早2~5/午3~6/晚3~7，帖间隔1~10min定时发布；引擎帽 20/天' },
       { label: '点赞', unit: '赞', done: ((g1.graph || {}).count || 0) + ((g1.maintain || {}).count || 0), planned: ((CFG.executor && CFG.executor.rollingCaps || {}).like != null ? CFG.executor.rollingCaps.like : null), plannedText: '≤' + (((CFG.executor || {}).rollingCaps || {}).like ?? 20) + ' 引擎帽', note: '含权重维护互动点赞（10-18 修复：原只数已退役图谱行）' },
       { label: '取关', unit: '人', done: sumWin('unfollow'), planned: 0, plannedText: '0（不做）', note: '你拍板不做（unfollowPolicy off + 滚动帽 0 双保险）' },
@@ -340,7 +340,7 @@ function buildData() {
     const verdict = radarVerdict || (fxVerdict === 'suspended' ? 'suspended' : fxVerdict === 'green' && radarVerdict === null ? 'green' : fxVerdict);
     return {
       key: a.key, handle: a.handle, name: acctName || a.key,
-      role: ({ run: '运行号（唯一授权真实互动）', linked: '已接入 · 未授权（不执行任务）', maintain: '已接入 · 维护授权（仅点赞 butcher/owen，v1.1）', observer: '观察者窗口（只读检测专用）' })[a.role || 'linked'],
+      role: ({ run: '运行号（真实互动授权）', linked: '已接入 · 未授权（不执行任务）', maintain: '已接入 · 维护授权（仅点赞 butcher/owen，v1.1）', observer: '观察者窗口（只读检测专用）' })[a.role || 'linked'],
       roleNote: a.note || '',
       isRun: a.role === 'run',
       verdict, verdictSource: radarVerdict ? 'radar' : 'fxtwitter', asOf: todayKey,
