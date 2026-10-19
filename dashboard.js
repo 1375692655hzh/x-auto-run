@@ -44,37 +44,36 @@ function windowRows(w, t, QX, who) { // 互关窗行（10-19 起四窗 8:30/13/1
       desc: '非互关清理能力默认关（unfollowPolicy off + 额度0 双保险）' },
   ];
 }
-// butcher 运营窗行（10-19 拍板 3+1 收窗：一次开窗=拉取+互关+条件回关+串门+发帖，p2/p3 另含权重维护）
-function opsRows(w, t) {
+// 运营窗行（10-19 拍板双号 3+1 收窗：一次开窗=拉取+互关+条件回关+串门+发帖，p2/p3 另含权重维护）
+function opsRows(w, t, who, QX) {
   const f = (m) => (((m || {})[w] != null) ? m[w] : null);
   const rows = [];
-  rows.push({ id: `community:${w}`, t, cat: '社区互关', name: `互关评论·运营窗${WL[w]}`, unit: '条', status: 'on', set: `${f(QB.community)} 条（你拍板 10-19：三窗 9+8+8）`, setNum: f(QB.community), sug: '≤10/天=低风险；20-50/天=高风险档（XActions 分档；25/天已在高风险档，已如实告知）',
+  rows.push({ id: `community:${w}`, t, cat: '社区互关', name: `互关评论·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '条', status: 'on', set: `${f(QX.community)} 条（你拍板 10-19 三窗分配）`, setNum: f(QX.community), sug: '≤10/天=低风险；20-50/天=高风险档（XActions 分档；已如实告知）',
     desc: '运营窗内一次开窗连做：拉取→互关→条件回关→串门→定时发帖' });
   rows.push({ id: `follow:${w}`, t, cat: '社区互关', name: `关注帖主·运营窗${WL[w]}`, unit: '人', status: 'on', set: '随互关评论 1:1 产生', setNum: null, sug: '日上限=滚动关注帽（XActions 分档；官方400/天硬顶）', desc: '每条互关评论自动先关注帖主（画像筛选）' });
   rows.push({ id: `followReply:${w}`, t, cat: '社区互关', name: `条件回关·运营窗${WL[w]}`, unit: '人', status: 'on', set: '条件行事（三窗 7+7+6=20/天上限）', setNum: null, sug: '按需回真实互动者', desc: '半夜链通知扫描喂候选；窗内满足条件即回' });
-  const a = ((CFG.posts && CFG.posts.budget && CFG.posts.budget.windowAllocation) || {})[w];
+  const BA = ((CFG.posts || {}).budgetByAccount || {})[who || 'butcher'] || ((CFG.posts || {}).budget) || {};
+  const a = (BA.windowAllocation || {})[w];
   const fmt = (x) => (x != null && typeof x === 'object' ? `${x.min}~${x.max}` : String(x ?? 0));
-  rows.push({ id: `post:${w}`, t, cat: '原创发布', name: `原创发布·运营窗${WL[w]}`, unit: '帖', status: 'wait-feed', set: `${fmt(a)} 帖（你拍板区间·间隔1~10min定时发布）`, setNum: null, sug: '区间随机 8~18/天（你拍板 10-18；官方50/天硬顶；引擎帽20/天）',
+  rows.push({ id: `post:${w}`, t, cat: '原创发布', name: `原创发布·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '帖', status: 'wait-feed', set: `${fmt(a)} 帖（你拍板区间·间隔1~10min定时发布）`, setNum: null, sug: '区间随机 8~18/天（你拍板 10-18；官方50/天硬顶；引擎帽20/天）',
     desc: '窗内拉取即发（对齐云端生成完成 09:35/12:35/19:35）' });
-  rows.push({ id: `visit:${w}`, t, cat: '主动互动', name: `关系池串门·运营窗${WL[w]}`, unit: '条', status: 'on', set: `${f(QB.visit)} 条（你拍板）`, setNum: f(QB.visit), sug: '回复类合计分档同前', desc: '互惠分选人→对方最新帖留言（LLM+质量门）' });
-  if (w !== 'p1') rows.push({ id: `maintain:${w}`, t, cat: '主动互动', name: `权重维护·运营窗${WL[w]}`, unit: '次', status: 'on', set: '≤1 帖/目标/窗（10-19 拍板：不随帖，固定午晚两窗，早上不做）', setNum: null, sug: '维护计入点赞/回复总帽', desc: 'butcher→owen：帖龄 20min~14h 新帖点赞（+≤1条/48h 回复）；互吹圈>1/3 跳过；雷达熔断' });
+  rows.push({ id: `visit:${w}`, t, cat: '主动互动', name: `关系池串门·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '条', status: 'on', set: `${f(QX.visit)} 条（你拍板）`, setNum: f(QX.visit), sug: '回复类合计分档同前', desc: '互惠分选人→对方最新帖留言（LLM+质量门）' });
+  if (w !== 'p1') rows.push({ id: `maintain:${w}`, t, cat: '主动互动', name: `权重维护·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '次', status: 'on', set: '≤1 帖/目标/窗（10-19 拍板：不随帖，固定午晚两窗，早上不做）', setNum: null, sug: '维护计入点赞/回复总帽', desc: '帖龄 20min~14h 新帖点赞（butcher 另有≤1条/48h 回复）；互吹圈>1/3 跳过；雷达熔断' });
   return rows;
 }
 const TASK_ROWS = [
-  { id: 'nightChain', t: '03:20', cat: '系统运维', name: '半夜数据窗（一条链）', unit: '次', status: 'on', set: '1 次/天·凌晨2-5点窗（+随机0-90min）', setNum: 1, sug: '1/天：互关粉丝占比全量扫描+雷达四维度+关系池通知扫描合并为一条链（10-19 拍板 3+1 收窗）', desc: 'followers-scan（各号自己窗口只读翻粉丝）→ radar --check（**项目级，零账号窗口**：HTTP 直取结果页优先，无缓存终值才起本机无头 Chrome；站点临时故障时该号置空不告警，次日自动重试）→ contacts --build+--scan --night（butcher 通知页）；产出清晨全部就绪' },
-  { id: 'health', t: '09:00', cat: '系统运维', name: '健康日检', unit: '次', status: 'on', set: '1 次', setNum: 1, sug: '1/天（radar 方法论：四项检测每日至少一检）', desc: 'FxTwitter 匿名三通道，喂六宫格/两图' },
+  { id: 'nightChain', t: '03:20', cat: '系统运维', name: '半夜数据窗（一条链）', unit: '次', status: 'on', set: '1 次/天·凌晨2-5点窗（+随机0-90min）', setNum: 1, sug: '1/天：互关粉丝占比全量扫描+雷达四维度+关系池通知扫描合并为一条链（10-19 拍板 3+1 收窗）', desc: 'followers-scan（各号自己窗口只读翻粉丝）→ radar --check（**项目级，零账号窗口**：HTTP 直取结果页优先，无缓存终值才起本机无头 Chrome；站点临时故障时该号置空不告警，次日自动重试）→ contacts --build+--scan --night（butcher+wcixot 通知页）；产出清晨全部就绪' },
+  { id: 'health', t: '09:00', cat: '系统运维', name: '指标日检', unit: '次', status: 'on', set: '1 次', setNum: 1, sug: '1/天', desc: '10-19 拍板定位=纯指标通道：FxTwitter 只取数字（粉丝/关注/发帖数/24h回复数）+suspended 硬事实；健康判定唯一权威=雷达四维（见半夜数据窗），建议通道已删（不稳易误判）' },
   { id: 'owen', t: '10:00', cat: '主动互动', name: 'Owen帖加持（外部任务）', unit: '帖', status: 'paused', set: '2 帖（旧拍板）', setNum: 2, sug: '≤2/天（外部任务维持旧档；X算法：直接导航不计推荐权重，仅关系维护价值）', desc: '外部 boost.js 任务：满45分钟新帖四连——**已退役**（10-17，接替者=权重维护互动行；ZCode 旧轮 10-18 已删除）' },
   { id: 'graph', t: '10:00', cat: '主动互动', name: '图谱点赞（外部任务）', unit: '赞', status: 'paused', set: '2 赞/轮（旧拍板）', setNum: null, sug: '点赞类合计≤20/天（XActions 50-100/天档，我们取约1/3更保守）', desc: '@' + (G0.handle || '?') + ' + @antiAIvo 随机点赞（只赞不评）——已随 boost.js 退役（10-17），能力未迁移，复活需拍板' },
-  ...windowRows('am', '08:30', QW, 'wcixot'),
-  ...windowRows('mid', '13:00', QW, 'wcixot'),
-  ...windowRows('pm', '16:00', QW, 'wcixot'),
-  ...windowRows('eve', '20:00', QW, 'wcixot'),
-  ...opsRows('p1', '09:35'),
-  ...opsRows('p2', '12:35'),
-  ...opsRows('p3', '19:35'),
-  { id: 'wcixotPublish', t: '09:35/12:35/19:35', cat: '原创发布', name: '发布窗·wcixot（纯发布）', unit: '帖', status: 'on', set: '早2~5/午3~6/晚3~7（同 butcher 区间，bat 锁窄模式）', setNum: null, sug: '区间随机 8~18/天', desc: 'wcixot 未收窗（待拍板）：发布窗仍只做 拉取+串门+发帖，互关走自己的四窗' },
-  { id: 'maintain', t: '随帖', cat: '主动互动', name: '权重维护互动（fullwin/wcixot 侧）', unit: '次', status: 'on', set: '≤2 帖/目标 · 1 号/帖 · ≤3 次/号（v1.1 拍板）', setNum: null, sug: '维护动作计入当日点赞/回复总帽', desc: '侦测器白天每25分钟盯 butcher/Owen 新帖：45min~3h 黄金窗挑帖点赞（fullwin/wcixot 执行）；butcher→owen 的维护已改固定窗（10-19 拍板，见运营窗 p2/p3 行）' },
-  { id: 'verifyReply', t: '随窗(+40分)', cat: '系统运维', name: '回复可见性抽查', unit: '次', status: 'on', set: '每窗后 1 次 ×1-2 条（v1.1）', setNum: 1, sug: '事件触发 3 次/天（零暴露直测回复隐藏风险；与雷达交叉验证）', desc: '10:55/16:00/21:00 匿名核验刚发回复外部可见性；连续2天<50%自动触发雷达复测' },
+  ...opsRows('p1', '09:35', 'butcher', QB),
+  ...opsRows('p2', '12:35', 'butcher', QB),
+  ...opsRows('p3', '19:35', 'butcher', QB),
+  ...opsRows('p1', '09:35', 'wcixot', QW),
+  ...opsRows('p2', '12:35', 'wcixot', QW),
+  ...opsRows('p3', '19:35', 'wcixot', QW),
+  { id: 'maintain', t: '12:35/19:35 窗内', cat: '主动互动', name: '权重维护互动（统一固定窗）', unit: '次', status: 'on', set: '≤1 帖/目标/窗 · ≤3 次/号/天（v1.1 拍板）', setNum: null, sug: '维护计入当日点赞/回复总帽', desc: '10-19 拍板收编：随帖侦测任务已删（黄金窗时序让位于开窗节奏），全部维护并进 p2/p3 运营窗（butcher→owen、wcixot→butcher+owen）；fullwin 退出矩阵（无运营窗账号，4粉小号贡献极低）' },
+  { id: 'verifyReply', t: '已下线', cat: '系统运维', name: '回复可见性抽查（已下线）', unit: '次', status: 'off', set: '—', setNum: null, sug: '—', desc: '10-19 拍板下线：走 FxTwitter 路径不稳定易误判，回复可见性以雷达四维（ghost/deboost 两维即回复可见性检测）为准，每晚 03:20 半夜数据窗' },
   { id: 'passive', t: '随通知', cat: '被动回复', name: '回复他人的回复', unit: '', status: 'pending', set: '不限（你拍板）', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '别人在我们帖下的回复→回应；评论模块待接入' },
   { id: 'report', t: '22:05', cat: '系统运维', name: '每日日报', unit: '份', status: 'on', set: '1 份', setNum: 1, sug: '1/天（复盘频率；XActions 建议每日审计）', desc: '计划任务 Xops日报 自动生成' },
 ];

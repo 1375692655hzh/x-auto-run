@@ -111,25 +111,24 @@ function digestTypeahead(res, handle) {
 
     const p = digestProfile(await getJSON(`${API}/2/profile/${h}`));
     await sleep(1500);
-    let s = { state: 'skipped' }, t = { state: 'skipped' };
+    let s = { state: 'skipped' };
     if (!LIGHT) {
       const since = Math.floor(Date.now() / 1000 - 24 * 3600); // 24h 窗口（10-18 用户拍板：回复数口径 48h→24h）
       s = digestStatuses(await getJSON(`${API}/2/profile/${h}/statuses?with_replies=1&since=${since}`), h);
-      await sleep(1500);
-      t = digestTypeahead(await getJSON(`${API}/2/typeahead?q=${encodeURIComponent(h)}&result_type=users`), h);
     }
 
     if (LIGHT) {
-      // 轻检档：只刷新 profile 数字，其余字段（statuses/typeahead/mutual/昨日判定）原样保留
+      // 轻检档：只刷新 profile 数字，其余字段（statuses/mutual/昨日判定）原样保留
       const prevAcct = (snap.accounts[key] || {});
       snap.accounts[key] = { ...prevAcct, handle: h, profile: p, lightAt: new Date().toISOString() };
       report[key] = { light: true, followers: p.followers, following: p.following, statuses: p.statuses, state: p.state };
       continue;
     }
 
-    const entry = { handle: h, profile: p, statuses: s, typeahead: t };
-    // 总判定：全部通道 ok 才 green；suspended 视为硬事实；其余一律 unknown（本版不下"异常"结论）
-    entry.verdict = p.state === 'suspended' ? 'suspended' : [p.state, s.state, t.state].every((x) => x === 'ok') ? 'green' : 'unknown';
+    const entry = { handle: h, profile: p, statuses: s };
+    // 定位（10-19 拍板）：health=纯指标通道（粉丝/关注/发帖数/回复数+suspended 硬事实）；
+    // 健康判定唯一权威=雷达四维（半夜数据窗），typeahead 建议通道已删（fx 不稳致误判，用户拍板）
+    entry.verdict = p.state === 'suspended' ? 'suspended' : 'green';
 
     const pv = prev && prev.accounts && prev.accounts[key];
     if (pv) {
@@ -141,7 +140,7 @@ function digestTypeahead(res, handle) {
     }
     // 合并更新：保留其他任务写进该账号条目的字段（如 followers-scan 的 mutual、radar 相关），不整体覆盖（10-16 教训）
     snap.accounts[key] = { ...(snap.accounts[key] || {}), ...entry };
-    report[key] = { verdict: entry.verdict, followers: p.followers, own24h: s.ownCount, reposts24h: s.repostCount, newestAt: s.newestAt, minViews: s.minViews, sensitive: s.sensitiveCount, typeaheadFound: t.found, delta: entry.delta };
+    report[key] = { verdict: entry.verdict, followers: p.followers, own24h: s.ownCount, reposts24h: s.repostCount, newestAt: s.newestAt, minViews: s.minViews, sensitive: s.sensitiveCount, delta: entry.delta };
   }
 
   snap.checkedAt = new Date().toISOString();

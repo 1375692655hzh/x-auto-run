@@ -1,4 +1,0 @@
-@echo off
-chcp 65001 >nul
-cd /d "D:\AI X auto\x-boost"
-node verify-reply.js --window=am >> state\schtask-verify.log 2>&1

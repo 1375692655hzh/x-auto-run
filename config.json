@@ -88,13 +88,10 @@
         "note": "10-19 拍板：不随帖侦测，固定进 12:35/19:35 运营窗（maintain-fixed.js 消费 fixed 字段；maintain-watch 侦测跳过带 fixed 的维护号）"
       },
       "fullwin": {
-        "targets": [
-          "butcher",
-          "owen"
-        ],
-        "actions": [
-          "like"
-        ]
+        "targets": [],
+        "actions": [],
+        "enabled": false,
+        "note": "10-19 拍板退出维护矩阵：无运营窗账号（专为维护开窗违背 3+1 收窗方向），且 4 粉小号点赞权重贡献极低；随帖侦测任务已删"
       },
       "wcixot": {
         "targets": [
@@ -103,7 +100,9 @@
         ],
         "actions": [
           "like"
-        ]
+        ],
+        "fixed": "p2,p3",
+        "note": "10-19 拍板：与 butcher 同款固定窗维护（12:35/19:35 运营窗内，不随帖）"
       }
     }
   },
@@ -317,17 +316,22 @@
       },
       "wcixot": {
         "community": {
-          "am": 5,
-          "mid": 5,
-          "pm": 5,
-          "eve": 5
+          "p1": 7,
+          "p2": 7,
+          "p3": 6
+        },
+        "replyFollowBack": {
+          "p1": 7,
+          "p2": 7,
+          "p3": 6
         },
         "visit": {
           "p1": 3,
           "p2": 3,
           "p3": 4
         },
-        "followBack": 0
+        "followBack": 0,
+        "note": "10-19 拍板 wcixot 收窗对齐 butcher：互关 20/天=7+7+6、条件回关 20/天=7+7+6（原四窗 5×4 作废）；三运营窗同刻 09:35/12:35/19:35"
       }
     }
   },

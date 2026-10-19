@@ -1,5 +1,5 @@
-// report.js — 每日人话日报生成器（纯只读）：把审计日志/账本/健康/池子翻译成一页能看懂的日报
-// 用法: node report.js [--date 2026-10-15]（默认今天）
+// report.js — 每日账号运营日报（10-19 拍板简洁版，纯只读）：每号一段（完成量/粉丝/雷达/发布/异常）+ 系统一行
+// 用法: node report.js [--date 2026-10-20]（默认今天）
 // 输出: 日报/YYYY-MM-DD.md + 控制台同屏
 const fs = require('fs');
 const path = require('path');
@@ -7,8 +7,6 @@ const path = require('path');
 const ROOT = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
 const STATE_DIR = path.join(ROOT, 'state');
-const QUEUE_DIR = path.join(ROOT, 'queue');
-const X = Object.assign({ rollingCaps: { reply: 8, follow: 18, like: 15, unfollow: 5 } }, CFG.executor || {});
 
 const argv = process.argv.slice(2);
 const argOf = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 ? argv[i + 1] : d; };
@@ -17,127 +15,93 @@ const DATE = argOf('date', today());
 const hm = (iso) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 
-const TASK_CN = {
-  1: 'Owen帖加持', 2: '社群互关回复', 3: '关注闭环', graph: '图谱点赞',
-  contacts: '关系台账采集(只读)', executor: '队列执行器', insights: 'Owen通知研究(只读)',
-};
-
-// ── 审计日志 → 人话条目 ──────────────────────────────────
+// ── 审计日志 → 每号计数（只认真实执行，dry/simulated 不计）─────────
 const logFile = path.join(STATE_DIR, `log-${DATE.slice(0, 7)}.jsonl`);
-const real = [], sys = [];
+const stats = {}; // key -> {community, followback, visit, post, maintain, follow, unknown:[], failed:[], skipped:{}}
+function bucket(key) {
+  if (!stats[key]) stats[key] = { community: 0, followback: 0, visit: 0, post: 0, maintain: 0, follow: 0, unknown: [], failed: [], postTimes: [] };
+  return stats[key];
+}
 try {
   for (const l of fs.readFileSync(logFile, 'utf8').trim().split('\n')) {
     let j; try { j = JSON.parse(l); } catch { continue; }
-    if (!j.at || !j.at.startsWith(DATE)) continue;
-    const acct = j.account || '-';
-    if (j.dry) { sys.push(`${hm(j.at)} [${acct}] (演练) ${TASK_CN[j.task] || j.task} ${j.post || j.target || ''}`); continue; }
-    if (j.task === 1) real.push(`${hm(j.at)} [${acct}] ${TASK_CN[1]}：帖 ${String(j.post).slice(-6)} 完成 ${(j.actions || []).join('+')}`);
-    else if (j.task === 2) real.push(`${hm(j.at)} [${acct}] ${TASK_CN[2]}：给 @${j.author} 回复「${String(j.text || '').slice(0, 24)}…」${j.unknown ? '（结果未确认，已占额度禁重发）' : ''}`);
-    else if (j.task === 3) real.push(`${hm(j.at)} [${acct}] ${j.action === 'followBack' ? '回关' : j.action === 'unfollow' ? '超时取关' : '主动关注'}：@${j.target}${j.verified === false ? '（未确认）' : ''}`);
-    else if (j.task === 'graph') real.push(`${hm(j.at)} [${acct}] ${TASK_CN.graph}：@${j.target} 的帖 ${String(j.post).slice(-6)}`);
-    else if (j.task === 'contacts') sys.push(`${hm(j.at)} [${acct}] ${TASK_CN.contacts}：${j.action}${j.events ? ' ' + j.events + ' 条事件' : j.pool ? ' 池=' + j.pool : ''}`);
-    else if (j.task === 'executor' && j.type === 'post' && j.status === 'done') real.push(`${hm(j.at)} [${acct}] 原创发布：${j.note || ''}「${String(j.text || '').slice(0, 30)}…」`);
-    else if (j.task === 'executor') sys.push(`${hm(j.at)} [${acct}] ${TASK_CN.executor}：${j.action}${j.id ? ' ' + j.id : ''} ${j.status || ''}${j.note ? ' ' + j.note : ''}`);
-    else sys.push(`${hm(j.at)} [${acct}] ${TASK_CN[j.task] || j.task} ${j.action || ''} ${j.target || j.post || ''}`);
+    if (j.dry || j.simulated || !j.at || !j.at.startsWith(DATE)) continue;
+    if (j.task !== 'executor' || j.action !== 'execute') continue;
+    const b = bucket(j.account);
+    if (j.status === 'unknown') { b.unknown.push(`${(j.id || '').slice(11)} ${j.type}${j.note ? '：' + String(j.note).slice(0, 40) : ''}`); continue; }
+    if (j.status === 'failed') { b.failed.push(`${(j.id || '').slice(11)} ${String(j.note || '').slice(0, 40)}`); continue; }
+    if (j.status !== 'done') continue;
+    if (j.kind === 'maintain') b.maintain += 1;
+    else if (j.type === 'post') { b.post += 1; b.postTimes.push(j.at); }
+    else if (j.type === 'follow') b.follow += 1;
+    else if (j.kind === 'community') b.community += 1;
+    else if (j.kind === 'followback-reply' || j.kind === 'followback') b.followback += 1;
+    else if (j.kind === 'visit') b.visit += 1;
   }
-} catch { /* 当日无日志 */ }
+} catch { }
 
-// ── 额度（boost 当日 + 滚动24h 合并） ────────────────────
-const rows = [];
-for (const acct of CFG.accounts.filter((a) => a.watch !== false)) { // 未授权接入号（watch:false）不进额度表
-  const st = readJson(path.join(STATE_DIR, acct.key + '.json'));
-  const d = (st && st.daily && st.daily[DATE]) || {};
-  const led = readJson(path.join(STATE_DIR, `ledger-${acct.key}.json`)) || { actions: {} };
-  const cut = Date.now() - 24 * 3600 * 1000;
-  const cnt = (t) => ((led.actions[t] || []).filter((x) => x > cut)).length;
-  rows.push(`- ${acct.key}：回复 ${(d.owenReplies || 0) + (d.communityReplies || 0) + cnt('reply')}/${X.rollingCaps.reply} · 关注 ${(d.follows || 0) + cnt('follow')}/${X.rollingCaps.follow} · 点赞 ${(d.likes || 0) + cnt('like')}/${X.rollingCaps.like} · 取关 ${(d.unfollows || 0) + cnt('unfollow')}/${X.rollingCaps.unfollow}`);
+// ── 快照：粉丝+雷达（当日缺则回溯昨天）────────────────────────
+function pickSnap() {
+  for (const d of [DATE, new Date(Date.parse(DATE) - 86400000).toISOString().slice(0, 10)]) {
+    const s = readJson(path.join(STATE_DIR, 'health-snapshots', `${d}.json`));
+    if (s) return { snap: s, day: d };
+  }
+  return { snap: null, day: null };
 }
+const { snap, day: snapDay } = pickSnap();
+const ySnap = readJson(path.join(STATE_DIR, 'health-snapshots', `${new Date(Date.parse(DATE) - 86400000).toISOString().slice(0, 10)}.json`));
 
-// ── 健康快照 ─────────────────────────────────────────────
-let health = '（今日未检测）';
-try {
-  const snap = readJson(path.join(STATE_DIR, 'health-snapshots', DATE + '.json'));
-  if (snap) {
-    const parts = Object.values(snap.accounts || {}).map((e) => {
-      const icon = e.verdict === 'green' ? '🟢' : e.verdict === 'suspended' ? '🔴' : '⚪(未知)';
-      return `${icon} @${e.handle} ${e.verdict}（粉丝 ${e.profile.followers ?? '?'}，24h 回复 ${e.statuses.ownCount ?? '?'}，敏感 ${e.statuses.sensitiveCount ?? 0}）`;
-    });
-    if (parts.length) health = parts.join('\n');
-    // v1.1 C7b：雷达四维 + 互关占比两行（数据已在快照里）
-    if (snap.radar && snap.radar.results) {
-      const rl = Object.entries(snap.radar.results).map(([h, r]) => {
-        const f = r.four || {};
-        return `- 雷达 @${h}：${f.score || '?'}/100 ${f.verdict || ''}（幽灵${f.ghost || '?'}｜降权${f.deboost || '?'}）`;
-      });
-      if (rl.length) health += '\n' + rl.join('\n');
-    }
-    const ml = Object.entries(snap.accounts || {}).filter(([, e]) => e.mutual).map(([k, e]) => `- 互关占比 ${k}：${(e.mutual.ratio * 100).toFixed(1)}%（${e.mutual.mutual}/${e.mutual.scanned}${e.mutual.scanned < 20 ? ' 样本过小' : ''}）`);
-    if (ml.length) health += '\n' + ml.join('\n');
-  }
-} catch { }
+// ── 每号一段 ─────────────────────────────────────────────
+const RQ = (key) => Object.assign({}, CFG.rounds.quotas, ((CFG.rounds || {}).quotasByAccount || {})[key] || {});
+const sumQ = (key, kind) => Object.values(RQ(key)[kind] || {}).reduce((s, x) => s + (x || 0), 0);
+const runAccounts = (CFG.accounts || []).filter((a) => a.role === 'run');
 
-// ── 关系池 ───────────────────────────────────────────────
-let pools = '';
-for (const acct of CFG.accounts) {
-  const c = readJson(path.join(STATE_DIR, `contacts-${acct.key}.json`));
-  if (!c) continue;
-  const ppl = Object.values(c.people || {});
-  const by = {};
-  for (const e of ppl) by[e.stage] = (by[e.stage] || 0) + 1;
-  pools += `- ${acct.key}：${ppl.length} 人（${Object.entries(by).map(([k, v]) => k + ':' + v).join(' ') || '空'}）\n`;
+const sections = runAccounts.map((a) => {
+  const b = stats[a.key] || bucket(a.key);
+  const q = RQ(a.key);
+  const lines = [];
+  lines.push(`- 完成量：互关评论 ${b.community}/${sumQ(a.key, 'community')} · 条件回关 ${b.followback}/${sumQ(a.key, 'replyFollowBack')} · 串门 ${b.visit}/${sumQ(a.key, 'visit')} · 原创发帖 ${b.post}（区间 8~18）· 权重维护 ${b.maintain}/≤3 · 关注帖主 ${b.follow}`);
+  // 粉丝
+  const e = snap && snap.accounts && snap.accounts[a.key];
+  const yE = ySnap && ySnap.accounts && ySnap.accounts[a.key];
+  const fNow = e && e.profile && e.profile.followers, fY = yE && yE.profile && yE.profile.followers;
+  lines.push(`- 粉丝：${fNow ?? '?'}${fNow != null && fY != null ? `（${fNow - fY >= 0 ? '+' : ''}${fNow - fY} vs 昨日）` : ''}`);
+  // 雷达
+  const r = snap && snap.radar && snap.radar.results && snap.radar.results[a.handle];
+  if (r && r.four && Object.values(r.four).some((v) => v != null)) {
+    const f = r.four;
+    lines.push(`- 雷达：${f.score || '?'}分（幽灵${(f.ghost || '?').replace('已检测到', '⚠')}${''} · 降权${f.deboost || '?'} · 搜索${f.search || '?'} · 建议${f.suggestion || '?'}）截至 ${snapDay}`);
+  } else lines.push(`- 雷达：今日无数据（站点临时故障或未跑，见半夜数据窗）`);
+  // 发布明细
+  if (b.postTimes.length) {
+    const ts = b.postTimes.map((x) => hm(x)).sort();
+    lines.push(`- 发布：${b.post} 条（${ts[0]}~${ts[ts.length - 1]}）`);
+  } else lines.push(`- 发布：0 条`);
+  // 异常
+  const abnormal = [];
+  if (b.unknown.length) abnormal.push(`结果不明 ${b.unknown.length}（${b.unknown.slice(0, 3).join('；')}${b.unknown.length > 3 ? '…' : ''}）`);
+  if (b.failed.length) abnormal.push(`失败 ${b.failed.length}（${b.failed.slice(0, 2).join('；')}${b.failed.length > 2 ? '…' : ''}）`);
+  lines.push(`- 异常：${abnormal.length ? abnormal.join('；') : '无'}`);
+  return `## ${a.key}（@${a.handle}）\n${lines.join('\n')}`;
+}).join('\n\n');
+
+// ── 系统一行 ─────────────────────────────────────────────
+const sysBits = [];
+if (snap && snap.radar && snap.radar.fetchedAt) {
+  const okR = Object.values(snap.radar.results || {}).filter((r) => r && r.four && Object.values(r.four).some((v) => v != null)).length;
+  if (okR) sysBits.push(`雷达 ${okR} 号有数据`);
 }
-
-// ── 队列 ─────────────────────────────────────────────────
-let queues = '';
-try {
-  for (const f of fs.readdirSync(QUEUE_DIR).filter((f) => f.endsWith('.json'))) {
-    const q = readJson(path.join(QUEUE_DIR, f));
-    if (!Array.isArray(q)) continue;
-    const by = {};
-    for (const e of q) by[e.status] = (by[e.status] || 0) + 1;
-    queues += `- ${f}：${q.length} 条（${Object.entries(by).map(([k, v]) => k + ':' + v).join(' ')}）\n`;
-  }
-} catch { }
-
-// ── 内容发布（三方方案 v1，2026-10-18）────────────────────
-let contentPub = '- 无（未拉取或未启用）';
-try {
-  const pulls = [];
-  for (const l of fs.readFileSync(logFile, 'utf8').trim().split('\n')) {
-    let j; try { j = JSON.parse(l); } catch { continue; }
-    if (j.task === 'contentPull' && j.action === 'pull' && j.at && j.at.startsWith(DATE) && !j.dry) pulls.push(j);
-  }
-  if (pulls.length) {
-    const sum = pulls.reduce((a, x) => ({ fetched: a.fetched + (x.fetched || 0), fresh: a.fresh + (x.fresh || 0), dropped: a.dropped + (x.dropped || 0), wrote: a.wrote + (x.wrote || 0) }), { fetched: 0, fresh: 0, dropped: 0, wrote: 0 });
-    const buf = readJson(path.join(STATE_DIR, 'content-buffer-butcher.json'));
-    const budget = (readJson(path.join(ROOT, 'config.json')).posts || {}).budget || {};
-    const postsDone = real.filter((x) => x.includes('原创发布')).length;
-    contentPub = `- 档位：Gentle ${budget.perDay || 2} 条/天（早${(budget.windowAllocation || {}).am ?? 1}/午${(budget.windowAllocation || {}).mid ?? 0}/晚${(budget.windowAllocation || {}).pm ?? 1}，拍板口径）\n- 供给链：拉取 ${sum.fetched} 条 → 新增 ${sum.fresh} → 过期丢弃 ${sum.dropped} → 投递 ${sum.wrote} → 实际发布 ${postsDone} 条（供给利用率≈${sum.fetched ? Math.round(postsDone / sum.fetched * 100) : 0}%，Gentle 低档预期）\n- 缓冲：${buf && buf.buffer ? buf.buffer.length : 0} 条待命`;
-  }
-} catch { }
+for (const k of Object.keys(snap && snap.accounts || {})) if (snap.accounts[k].mutual) sysBits.push(`互关扫描 ${k} ${(snap.accounts[k].mutual.ratio * 100).toFixed(0)}%`);
+if (!sysBits.length) sysBits.push('半夜数据窗未跑/无产出');
 
 const md = `# 运营日报 ${DATE}
 
-## 一、今日在 X 平台真实发生的动作（${real.length} 条）
-${real.length ? real.map((x) => '- ' + x).join('\n') : '- 无（今日零真实互动）'}
+${sections}
 
-## 二、系统动作（只读/开发/演练，${sys.length} 条）
-${sys.length ? sys.map((x) => '- ' + x).join('\n') : '- 无'}
+---
+系统：${sysBits.join(' · ')}｜任务面=半夜数据窗 03:20 + 三运营窗×两号（09:35/12:35/19:35）+ 指标日检/晚检 + 日报
 
-## 三、额度消耗（今日+滚动24h 合并口径）
-${rows.join('\n')}
-
-## 四、账号健康
-${health}
-
-## 五、关系池
-${pools || '- 未建池'}
-## 六、内容发布
-${contentPub}
-## 七、队列
-${queues || '- 无队列文件'}
-
-> 生成于 ${new Date().toISOString()}（node report.js）；实时全貌：node status.js；总控看板：运营看板.md
+> 生成于 ${new Date().toISOString()}（node report.js）；实时全貌：监控页 http://127.0.0.1:8787
 `;
 fs.mkdirSync(path.join(ROOT, '日报'), { recursive: true });
 fs.writeFileSync(path.join(ROOT, '日报', `${DATE}.md`), md);
