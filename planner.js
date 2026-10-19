@@ -292,9 +292,9 @@ async function planFollowback(ts) {
 async function planReplyFollowBack(ts) {
   const contacts = readJson(path.join(STATE_DIR, `contacts-${ACCOUNT}.json`));
   if (!contacts) { console.log('关系池未建，条件回关跳过'); return []; }
-  const inWin = loadQueue(WINDOW).filter((e) => e.kind === 'followback-reply' && e.status !== 'skipped').length;
-  const cap = Math.min(windowQuota('replyFollowBack') - inWin, 30 - countedToday('followback-reply'));
-  if (cap <= 0) { console.log('条件回关额度已满/未配置'); return []; }
+  // 10-19 拍板：条件回关全账号无任务上限（满足"7天内回复过我+关注过我"即回，不设每日/每窗额度）；
+  // 60 仅是防异常爆量的护栏，真实约束=候选条件筛选 + 滚动关注帽（executor.rollingCaps.follow）
+  const cap = 60;
   const cut7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
   const queuedHandles = new Set();
   for (const w of WINS) for (const e of loadQueue(w)) if (e.kind === 'followback-reply' && e.targetHandle) queuedHandles.add(e.targetHandle.toLowerCase());

@@ -211,12 +211,13 @@
   },
   "executor": {
     "rollingCaps": {
-      "reply": 40,
-      "follow": 50,
+      "reply": 60,
+      "follow": 100,
       "like": 20,
       "unfollow": 0,
       "post": 20
     },
+    "rollingCapsNote": "10-19 深夜拍板同步：回关无任务上限后，关注帽 50→100（wcixot 互关 40 全带 followFirst + 回关的余量；官方 400/天硬顶的四分之一，引擎安全网非任务量）；回复帽 40→60（wcixot 互关 40+串门 20 的余量）",
     "queueTtlMinutes": 300,
     "actionGapGaussMs": [
       90000,
@@ -284,13 +285,7 @@
         "p2": 3,
         "p3": 4
       },
-      "followBack": 0,
-      "replyFollowBack": {
-        "am": 5,
-        "mid": 5,
-        "pm": 5,
-        "eve": 5
-      }
+      "followBack": 0
     },
     "dryRounds": 2,
     "scanPosts": 30,
@@ -301,37 +296,27 @@
           "p2": 8,
           "p3": 8
         },
-        "replyFollowBack": {
-          "p1": 7,
-          "p2": 7,
-          "p3": 6
-        },
         "visit": {
           "p1": 3,
           "p2": 3,
           "p3": 4
         },
         "followBack": 0,
-        "note": "10-19 拍板 butcher 3+1 收窗：互关 25/天改三运营窗 9+8+8；条件回关 20/天改 7+7+6（原四窗 7/6/6/6 与 5/5/5/5 作废）"
+        "note": "10-19 拍板 butcher 3+1 收窗：互关 25/天三运营窗 9+8+8；串门上限 10/天=3+3+4；条件回关全账号无任务上限（quota 键已删）"
       },
       "wcixot": {
         "community": {
-          "p1": 7,
-          "p2": 7,
-          "p3": 6
-        },
-        "replyFollowBack": {
-          "p1": 7,
-          "p2": 7,
-          "p3": 6
+          "p1": 14,
+          "p2": 13,
+          "p3": 13
         },
         "visit": {
-          "p1": 3,
-          "p2": 3,
-          "p3": 4
+          "p1": 7,
+          "p2": 7,
+          "p3": 6
         },
         "followBack": 0,
-        "note": "10-19 拍板 wcixot 收窗对齐 butcher：互关 20/天=7+7+6、条件回关 20/天=7+7+6（原四窗 5×4 作废）；三运营窗同刻 09:35/12:35/19:35"
+        "note": "10-19 深夜拍板：互关 40/天=14+13+13、串门 20/天=7+7+6（上限为 wcixot 专属，butcher 串门上限 10）；条件回关全账号无任务上限（quota 键已删，planner 不再限额）"
       }
     }
   },

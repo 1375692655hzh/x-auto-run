@@ -51,7 +51,7 @@ function opsRows(w, t, who, QX) {
   rows.push({ id: `community:${w}`, t, cat: '社区互关', name: `互关评论·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '条', status: 'on', set: `${f(QX.community)} 条（你拍板 10-19 三窗分配）`, setNum: f(QX.community), sug: '≤10/天=低风险；20-50/天=高风险档（XActions 分档；已如实告知）',
     desc: '运营窗内一次开窗连做：拉取→互关→条件回关→串门→定时发帖' });
   rows.push({ id: `follow:${w}`, t, cat: '社区互关', name: `关注帖主·运营窗${WL[w]}`, unit: '人', status: 'on', set: '随互关评论 1:1 产生', setNum: null, sug: '日上限=滚动关注帽（XActions 分档；官方400/天硬顶）', desc: '每条互关评论自动先关注帖主（画像筛选）' });
-  rows.push({ id: `followReply:${w}`, t, cat: '社区互关', name: `条件回关·运营窗${WL[w]}`, unit: '人', status: 'on', set: '条件行事（三窗 7+7+6=20/天上限）', setNum: null, sug: '按需回真实互动者', desc: '半夜链通知扫描喂候选；窗内满足条件即回' });
+  rows.push({ id: `followReply:${w}`, t, cat: '社区互关', name: `条件回关·运营窗${WL[w]}`, unit: '人', status: 'on', set: '无任务上限（10-19 拍板全账号：回复+关注双条件满足即回）', setNum: null, sug: '真实约束=候选条件+滚动关注帽（引擎安全网）', desc: '半夜链通知扫描喂候选；窗内满足条件即回' });
   const BA = ((CFG.posts || {}).budgetByAccount || {})[who || 'butcher'] || ((CFG.posts || {}).budget) || {};
   const a = (BA.windowAllocation || {})[w];
   const fmt = (x) => (x != null && typeof x === 'object' ? `${x.min}~${x.max}` : String(x ?? 0));
@@ -313,11 +313,12 @@ function buildData() {
     const WKEYS = Object.keys((CFG.rounds || {}).windows || { am: 1, mid: 1, pm: 1 });
     const sumWin = (p) => WKEYS.reduce((n, w) => n + ((g1[`${p}:${w}`] || {}).count || 0), 0);
     const planWin = (m) => WKEYS.reduce((n, w) => n + (m && typeof m[w] === 'number' ? m[w] : 0), 0);
+    const RQA = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount || {})[a.key] || {})); // 每号实际配额（10-19 起双号数字分叉：互关 25/40、串门 10/20）
     const quotas = [
-      { label: '互关评论', unit: '条', done: sumWin('community'), planned: planWin(Q.community), plannedText: String(planWin(Q.community)), note: '四窗合计（你拍板' + planWin(Q.community) + '/天）' },
+      { label: '互关评论', unit: '条', done: sumWin('community'), planned: planWin(RQA.community), plannedText: String(planWin(RQA.community)), note: '三运营窗合计（拍板' + planWin(RQA.community) + '/天）' },
       { label: '关注帖主', unit: '人', done: sumWin('follow'), planned: null, plannedText: '随互关 1:1', note: '条件行事：每条互关评论自动先关注（非按量任务，无目标量）' },
-      { label: '条件回关', unit: '人', done: sumWin('followReply'), planned: null, plannedText: '条件行事（上限20/天）', note: '回复+关注双条件满足即回，候选 0 不做' },
-      { label: '关系串门', unit: '条', done: sumWin('visit'), planned: planWin(Q.visit), plannedText: String(planWin(Q.visit)), note: '三发布窗合计（你拍板' + planWin(Q.visit) + '/天）' },
+      { label: '条件回关', unit: '人', done: sumWin('followReply'), planned: null, plannedText: '无任务上限', note: '10-19 拍板全账号：回复+关注双条件满足即回；唯一约束=滚动关注帽（引擎安全网非任务量）' },
+      { label: '关系串门', unit: '条', done: sumWin('visit'), planned: planWin(RQA.visit), plannedText: String(planWin(RQA.visit)), note: '三运营窗合计（拍板上限：butcher 10/wcixot 20，按关系池实有人数自然衰减）' },
       { label: '原创发布', unit: '帖', done: sumWin('post'), planned: null, plannedText: '8~18/天（区间随机）', note: '10-18 你拍板：早2~5/午3~6/晚3~7，帖间隔1~10min定时发布；引擎帽 20/天' },
       { label: '点赞', unit: '赞', done: ((g1.graph || {}).count || 0) + ((g1.maintain || {}).count || 0), planned: ((CFG.executor && CFG.executor.rollingCaps || {}).like != null ? CFG.executor.rollingCaps.like : null), plannedText: '≤' + (((CFG.executor || {}).rollingCaps || {}).like ?? 20) + ' 引擎帽', note: '含权重维护互动点赞（10-18 修复：原只数已退役图谱行）' },
       { label: '取关', unit: '人', done: sumWin('unfollow'), planned: 0, plannedText: '0（不做）', note: '你拍板不做（unfollowPolicy off + 滚动帽 0 双保险）' },
