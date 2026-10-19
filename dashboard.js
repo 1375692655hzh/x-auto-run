@@ -324,7 +324,7 @@ function buildData() {
     const planWin = (m) => WKEYS.reduce((n, w) => n + (m && typeof m[w] === 'number' ? m[w] : 0), 0);
     const RQA = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount || {})[a.key] || {})); // 每号实际配额（10-19 起双号数字分叉：互关 25/40、串门 10/20）
     const quotas = [
-      { label: '互关评论', unit: '条', done: sumWin('community'), planned: planWin(RQA.community), plannedText: String(planWin(RQA.community)), note: '三运营窗合计（拍板' + planWin(RQA.community) + '/天）' },
+      { label: '互关评论', unit: '条', done: sumWin('community'), planned: ((((CFG.rounds || {}).quotasByAccount || {})[a.key] || {}).community) ? planWin(RQA.community) : null, plannedText: ((((CFG.rounds || {}).quotasByAccount || {})[a.key] || {}).community) ? String(planWin(RQA.community)) : '未配置（仅发布号）', note: '三运营窗合计（拍板' + planWin(RQA.community) + '/天）' },
       { label: '关注帖主', unit: '人', done: sumWin('follow'), planned: null, plannedText: '随互关 1:1', note: '条件行事：每条互关评论自动先关注（非按量任务，无目标量）' },
       { label: '条件回关', unit: '人', done: sumWin('followReply'), planned: null, plannedText: '无任务上限', note: '10-19 拍板全账号：回复+关注双条件满足即回；唯一约束=滚动关注帽（引擎安全网非任务量）' },
       { label: '关系串门', unit: '条', done: sumWin('visit'), planned: (((((CFG.rounds || {}).quotasByAccount || {})[a.key] || {}).visit) ? planWin(RQA.visit) : null), plannedText: ((((CFG.rounds || {}).quotasByAccount || {})[a.key] || {}).visit) ? String(planWin(RQA.visit)) : '未配置（新号轻装）', note: '三运营窗合计（拍板上限：butcher 10/wcixot 20，按关系池实有人数自然衰减）' },
