@@ -399,7 +399,10 @@ async function planPost(ts) {
     for (const it of items) texts.push({ text: String(it.text).trim(), quote: !!it.quote, quoteUrl: it.quoteUrl || it.quote_url || null });
     if (texts.length >= cap + 5) break;
   }
-  if (!texts.length) { console.log('posts-inbox/ 无待发内容'); return []; }
+  // 修复（10-19 发布死锁根因）：即使 texts 为空也要消费文件（改名 .done），否则空文件永远留在投递箱 →
+  // content-pull 看到"未消费"拒绝滴新 → planner 看到"无内容"不消费 → 死锁，全天发布=0
+  for (const f of usedFiles) { try { fs.renameSync(path.join(POSTS_INBOX, f), path.join(POSTS_INBOX, f + '.done-' + Date.now())); } catch { } }
+  if (!texts.length) { console.log('posts-inbox/ 无待发内容（文件已消费防死锁）'); return []; }
   // 去重：今日各窗队列 + 已发历史
   const seen = new Set(ts.replyHistory);
   for (const w of WINS) for (const e of loadQueue(w)) if (e.text) seen.add(e.text);

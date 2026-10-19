@@ -88,7 +88,18 @@ function enqueuedToday(local) {
     //   非 run 的发布授权号（如 wcixot）走"拉取后即时轻通道"：滴灌完直接拉起 planner(post)+executor，不占 butcher 三窗）
     let wrote = 0, why = '';
     const canPublish = b.bound && b.publishAuth && b.publish;
-    const unconsumed = fs.existsSync(INBOX) ? fs.readdirSync(INBOX).filter((f) => f.startsWith(`pull-${b.local}-`) && f.endsWith('.json')) : [];
+    let unconsumed = fs.existsSync(INBOX) ? fs.readdirSync(INBOX).filter((f) => f.startsWith(`pull-${b.local}-`) && f.endsWith('.json')) : [];
+    // 超时清理（10-19 修复）：>2h 未消费的投递文件自动改名 .done-stale，防止空文件死锁全天发布
+    for (const sf of unconsumed) {
+      try {
+        const st2 = fs.statSync(path.join(INBOX, sf));
+        if (Date.now() - st2.mtimeMs > 2 * 3600000) {
+          fs.renameSync(path.join(INBOX, sf), path.join(INBOX, sf + '.done-stale-' + Date.now()));
+          LOG(`清理超时未消费文件: ${sf}（>2h）`);
+        }
+      } catch { }
+    }
+    unconsumed = fs.existsSync(INBOX) ? fs.readdirSync(INBOX).filter((f) => f.startsWith(`pull-${b.local}-`) && f.endsWith('.json')) : [];
     if (keyFailed) why = 'key失效全停';
     else if (!canPublish) why = `未授权/未开闸(publishAuth=${b.publishAuth},publish=${b.publish})`;
     else if (isWeekend) why = '周末不投递（拍板 P5）';
@@ -96,13 +107,18 @@ function enqueuedToday(local) {
     else {
       const BA = (CFG.posts && CFG.posts.budgetByAccount || {})[b.local] || BUDGET;
       const w = nextWindow();
-      const alloc = (BA.windowAllocation || {})[w] ?? 0;
+      const allocR = (BA.windowAllocation || {})[w] ?? 0;
+      const alloc = allocR && typeof allocR === 'object' ? (allocR.min + Math.floor(Math.random() * (allocR.max - allocR.min + 1))) : allocR; // 区间对象→随机数（10-19 修复：对象直接进 Math.min = NaN）
       const drip = Math.min(alloc, (BA.perDay || 2) - enqueuedToday(b.local), st.buffer.length);
       if (drip <= 0) why = `预算/缓冲不足(${w}窗=${alloc}，今日已入队=${enqueuedToday(b.local)}，缓冲=${st.buffer.length})`;
       else if (!DRY) {
         const batch = st.buffer.splice(0, drip);
-        writeJson(path.join(INBOX, `pull-${b.local}-${Date.now()}.json`), batch.map((x) => ({ text: x.text, quote: x.quote || undefined, quoteUrl: x.quoteUrl || undefined })));
-        wrote = drip;
+        if (batch.length > 0) {
+          writeJson(path.join(INBOX, `pull-${b.local}-${Date.now()}.json`), batch.map((x) => ({ text: x.text, quote: x.quote || undefined, quoteUrl: x.quoteUrl || undefined })));
+          wrote = drip;
+        } else {
+          why = '滴灌批次为空（缓冲内容全部过期），不写空文件'; // 10-19 修复：空文件曾在投递箱死锁全天发布
+        }
         // 即时轻通道（仅非 run 授权号）：拉起该号自己的 planner(post)+executor；带健康门（suspended/敏感→不发）
         if (roleOf(b.local) !== 'run' && drip > 0) {
           let gate = '通过';
