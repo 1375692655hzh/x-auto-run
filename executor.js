@@ -448,8 +448,14 @@ function executeAction(page, entry) {
       // 定时发布（10-18 拍板）：postAt 未到的帖在普通会话里跳过（由 round 到点用 --entry 单独拉起）；间隔保护=相邻帖 ≥60 秒
       if (e.type === 'post') {
         if (e.postAt && !ENTRY_ID && Date.parse(e.postAt) > Date.now() + 30000) { continue; } // 未到点：本轮会话不碰（状态保持 planned）
+        // 间隔保护=相邻帖 ≥60 秒：不足则顺延等待（而非跳过）——账本时间戳记在尝试时，
+        // 批量过期帖紧接着进入循环会被误杀（10-19 实战：butcher 白丢 2 条）；等待上限 90 秒，超出仍跳过
         const lastPost = Math.max(0, ...((LEDGER.actions.post || []).filter(Number.isFinite)));
-        if (lastPost && Date.now() - lastPost < 60 * 1000) { e.status = 'skipped'; e.result = `距上一条原创帖不足 60 秒`; stats.skipped.push(e.id); continue; }
+        if (lastPost) {
+          const gapLeft = 60 * 1000 - (Date.now() - lastPost);
+          if (gapLeft > 90 * 1000) { e.status = 'skipped'; e.result = `距上一条原创帖过近且积压过久(>${Math.round(gapLeft / 60000)}min)`; stats.skipped.push(e.id); continue; }
+          if (gapLeft > 0) await sleep(gapLeft);
+        }
       }
 
       // exactly-once：发送前落盘 intent
@@ -497,12 +503,16 @@ function executeAction(page, entry) {
       }
       if (done < MAX_ACTIONS) await gsleep(X.actionGapGaussMs);
     }
-    if (sessionAborted) for (const e of queue) if (e.status === 'planned') { e.status = 'skipped'; e.result = '会话中止'; stats.skipped.push(e.id); saveQueue(queue); }
+    // 会话中止只清本会话要处理的条目；未到点的定时帖（postAt 在未来）留给 round 到点 --entry 拉起，
+    // 不再陪葬（10-19 实战：wcixot 串门 3 连败触发熔断，误杀 5 条待发定时帖）
+    if (sessionAborted) for (const e of queue) if (e.status === 'planned' && !(e.type === 'post' && e.postAt && Date.parse(e.postAt) > Date.now())) { e.status = 'skipped'; e.result = '会话中止'; stats.skipped.push(e.id); saveQueue(queue); }
   } finally {
-    // 关闭全部页签再断开（10-19 修复：定时发帖多个 executor 进程共用窗口，各自关自己的 page
-    // 会留下别人的页签→累积 22 个。改为关 ALL pages 确保干净）
+    // 关闭多余页签再断开（10-19 修复：定时发帖多个 executor 进程共用窗口，各自关自己的 page
+    // 会留下别人的页签→累积 22 个。改为全量清理；
+    // 10-19 二次修复：必须留 1 页——比特浏览器 syncTabs 会把开着的页签回写进窗口配置的
+    // 启动页 url，每次开窗全部复活，越积越多（owen 曾 11 页）。留 1 页 + 启动页配置单一化，双保险）
     if (browser) {
-      try { const allPages = await browser.pages(); for (const p of allPages) { try { await p.close(); } catch { } } } catch { }
+      try { const allPages = await browser.pages(); for (let i = 1; i < allPages.length; i++) { try { await allPages[i].close(); } catch { } } } catch { }
       await browser.disconnect();
     }
     if (ws) await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { });
