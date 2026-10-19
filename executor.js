@@ -499,7 +499,12 @@ function executeAction(page, entry) {
     }
     if (sessionAborted) for (const e of queue) if (e.status === 'planned') { e.status = 'skipped'; e.result = '会话中止'; stats.skipped.push(e.id); saveQueue(queue); }
   } finally {
-    if (browser) { try { await page.close(); } catch { } await browser.disconnect(); }
+    // 关闭全部页签再断开（10-19 修复：定时发帖多个 executor 进程共用窗口，各自关自己的 page
+    // 会留下别人的页签→累积 22 个。改为关 ALL pages 确保干净）
+    if (browser) {
+      try { const allPages = await browser.pages(); for (const p of allPages) { try { await p.close(); } catch { } } } catch { }
+      await browser.disconnect();
+    }
     if (ws) await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { });
     saveQueue(queue);
     releaseLock();

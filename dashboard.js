@@ -412,7 +412,7 @@ function buildData() {
       if (bad.length) alerts.push({ level: a.isRun ? 'P1' : 'P2', text: `${a.name} 雷达${bad.map((k) => ({ ghost: '幽灵', deboost: '降权', search: '搜索', suggestion: '建议' }[k])).join('+')}受限（${((a.radar.four.score) || '?')}/100，截至 ${(a.radar.date || '').slice(5)}）` });
     }
     const uq = (normalizeGrid(agg[a.key] || {})[TODAY] || {});
-    let unkCount = 0; for (const [k, v] of Object.entries(uq)) if (typeof v === 'object' && v.unknown) unkCount += v.unknown;
+    let unkCount = 0; for (const [k, v] of Object.entries(uq)) if (typeof v === 'object' && v.unknown && v.items && v.items.some((x) => x.includes('post-') || x.includes('community-') || x.includes('visit-'))) unkCount += v.unknown; // 只计有动作ID的（10-19：session级unknown误计入）
     if (unkCount > 0) alerts.push({ level: 'P0', text: `${a.name} 今日 ${unkCount} 条执行结果不明（unknown 待核）` });
     // 额度将满
     for (const q of a.quotas) if (q.planned > 0 && q.done >= q.planned * 0.9 && q.done < q.planned) alerts.push({ level: 'P2', text: `${a.name} ${q.label} ${q.done}/${q.planned}，额度将满` });
