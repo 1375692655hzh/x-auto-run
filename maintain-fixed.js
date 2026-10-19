@@ -100,7 +100,11 @@ async function fetchOwnPosts(handle) {
     // 不再跨号共享挤占——p2 窗 wcixot 先跑曾会把 butcher 挤到无帖可维护）；
     // 同帖去重仍是全局的（下方 statusId 过滤不分号）：一帖只被一个号互动，防多号围攻协同画像（v1.1 M3 保留）
     const selectedToday = new Set(loadMLed().filter((e) => e.account === ACCOUNT && e.targetHandle === tAcct.handle && e.at.slice(0, 10) === today()).map((e) => e.statusId)).size;
-    if (selectedToday >= (M.postsPerTargetPerDay || 2)) { notes.push(`@${tAcct.handle} 今日已维护满${M.postsPerTargetPerDay}帖`); continue; }
+    if (selectedToday >= (M.postsPerTargetPerDay || 2)) { notes.push(`@${tAcct.handle} 今日已维护满${M.postsPerTargetPerDay}帖（本号额度）`); continue; }
+    // 每目标每日互动总帽（跨维护号，10-20 补：分账后维护号扩到 3-4 个时理论 2×N 会破 perTargetDailyCap 线；
+    // 矩阵按需调整（用户拍板"四号互维护自己以外的号"）后任何规模都由这里兜底）
+    const targetActionsToday = loadMLed().filter((e) => e.targetHandle === tAcct.handle && e.at.slice(0, 10) === today()).length;
+    if (targetActionsToday >= (M.perTargetDailyCap || 5)) { notes.push(`@${tAcct.handle} 今日已被各号合计维护 ${targetActionsToday} 次达总帽，本号跳过`); continue; }
     if (!cands.length) { notes.push(`@${tAcct.handle} 无新候选帖`); continue; }
     const p = cands[0]; // 每窗每目标 1 帖：p2+p3 两窗凑满 postsPerTargetPerDay
     const natural = (p.likes || 0) + (p.replies || 0);
