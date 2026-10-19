@@ -31,6 +31,7 @@ const WL = { am: '早', mid: '午', pm: '下', eve: '晚', p1: '早', p2: '午',
 const Q = ((CFG.rounds || {}).quotas) || {};
 const QB = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).butcher) || Q; // butcher 实际配额（10-19 三运营窗 9+8+8 / 7+7+6）
 const QW = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).wcixot) || Q; // wcixot 实际配额
+const QM = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).maccostin) || Q; // maccostin 实际配额（10-19 接入：互关=butcher 减半）
 function windowRows(w, t, QX, who) { // 互关窗行（10-19 起四窗 8:30/13/16/20 仅 wcixot 在跑）
   const f = (m) => (((m || {})[w] != null) ? m[w] : null);
   return [
@@ -44,8 +45,9 @@ function windowRows(w, t, QX, who) { // 互关窗行（10-19 起四窗 8:30/13/1
       desc: '非互关清理能力默认关（unfollowPolicy off + 额度0 双保险）' },
   ];
 }
-// 运营窗行（10-19 拍板双号 3+1 收窗：一次开窗=拉取+互关+条件回关+串门+发帖，p2/p3 另含权重维护）
-function opsRows(w, t, who, QX) {
+// 运营窗行（10-19 拍板三号收窗：一次开窗=拉取+互关+条件回关+串门+发帖，p2/p3 另含权重维护）
+// opts.visit/maintain=false 用于 maccostin（新号轻装：无串门无维护，bat 锁窄模式）
+function opsRows(w, t, who, QX, opts = {}) {
   const f = (m) => (((m || {})[w] != null) ? m[w] : null);
   const rows = [];
   rows.push({ id: `community:${w}`, t, cat: '社区互关', name: `互关评论·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '条', status: 'on', set: `${f(QX.community)} 条（你拍板 10-19 三窗分配）`, setNum: f(QX.community), sug: '≤10/天=低风险；20-50/天=高风险档（XActions 分档；已如实告知）',
@@ -57,8 +59,8 @@ function opsRows(w, t, who, QX) {
   const fmt = (x) => (x != null && typeof x === 'object' ? `${x.min}~${x.max}` : String(x ?? 0));
   rows.push({ id: `post:${w}`, t, cat: '原创发布', name: `原创发布·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '帖', status: 'wait-feed', set: `${fmt(a)} 帖（你拍板区间·间隔1~10min定时发布）`, setNum: null, sug: '区间随机 8~18/天（你拍板 10-18；官方50/天硬顶；引擎帽20/天）',
     desc: '窗内拉取即发（对齐云端生成完成 09:35/12:35/19:35）' });
-  rows.push({ id: `visit:${w}`, t, cat: '主动互动', name: `关系池串门·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '条', status: 'on', set: `${f(QX.visit)} 条（你拍板）`, setNum: f(QX.visit), sug: '回复类合计分档同前', desc: '互惠分选人→对方最新帖留言（LLM+质量门）' });
-  if (w !== 'p1') rows.push({ id: `maintain:${w}`, t, cat: '主动互动', name: `权重维护·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '次', status: 'on', set: '≤1 帖/目标/窗（10-19 拍板：不随帖，固定午晚两窗，早上不做）', setNum: null, sug: '维护计入点赞/回复总帽', desc: '帖龄 20min~14h 新帖点赞（butcher 另有≤1条/48h 回复）；互吹圈>1/3 跳过；雷达熔断' });
+  if (opts.visit !== false) rows.push({ id: `visit:${w}`, t, cat: '主动互动', name: `关系池串门·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '条', status: 'on', set: `${f(QX.visit)} 条（你拍板）`, setNum: f(QX.visit), sug: '回复类合计分档同前', desc: '互惠分选人→对方最新帖留言（LLM+质量门）' });
+  if (opts.maintain !== false && w !== 'p1') rows.push({ id: `maintain:${w}`, t, cat: '主动互动', name: `权重维护·运营窗${WL[w]}${who ? '（' + who + '）' : ''}`, unit: '次', status: 'on', set: '≤1 帖/目标/窗（10-19 拍板：不随帖，固定午晚两窗，早上不做）', setNum: null, sug: '维护计入点赞/回复总帽', desc: '帖龄 20min~14h 新帖点赞（butcher 另有≤1条/48h 回复）；互吹圈>1/3 跳过；雷达熔断' });
   return rows;
 }
 const TASK_ROWS = [
@@ -72,6 +74,9 @@ const TASK_ROWS = [
   ...opsRows('p1', '09:35', 'wcixot', QW),
   ...opsRows('p2', '12:35', 'wcixot', QW),
   ...opsRows('p3', '19:35', 'wcixot', QW),
+  ...opsRows('p1', '09:35', 'maccostin', QM, { visit: false, maintain: false }),
+  ...opsRows('p2', '12:35', 'maccostin', QM, { visit: false, maintain: false }),
+  ...opsRows('p3', '19:35', 'maccostin', QM, { visit: false, maintain: false }),
   { id: 'maintain', t: '12:35/19:35 窗内', cat: '主动互动', name: '权重维护互动（统一固定窗）', unit: '次', status: 'on', set: '≤1 帖/目标/窗 · ≤3 次/号/天（v1.1 拍板）', setNum: null, sug: '维护计入当日点赞/回复总帽', desc: '10-19 拍板收编：随帖侦测任务已删（黄金窗时序让位于开窗节奏），全部维护并进 p2/p3 运营窗（butcher→owen、wcixot→butcher+owen）；fullwin 退出矩阵（无运营窗账号，4粉小号贡献极低）' },
   { id: 'verifyReply', t: '已下线', cat: '系统运维', name: '回复可见性抽查（已下线）', unit: '次', status: 'off', set: '—', setNum: null, sug: '—', desc: '10-19 拍板下线：走 FxTwitter 路径不稳定易误判，回复可见性以雷达四维（ghost/deboost 两维即回复可见性检测）为准，每晚 03:20 半夜数据窗' },
   { id: 'passive', t: '随通知', cat: '被动回复', name: '回复他人的回复', unit: '', status: 'pending', set: '不限（你拍板）', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '别人在我们帖下的回复→回应；评论模块待接入' },
