@@ -70,10 +70,6 @@
     "goldenMinMin": 45,
     "goldenMaxMin": 180,
     "postsPerTargetPerDay": 2,
-    "perTargetDailyCap": 5,
-    "perMaintainerDailyCap": 3,
-    "dominanceRatio": 0.34,
-    "replyMinGapHours": 48,
     "pollFailStop": 5,
     "maintainers": {
       "butcher": {
@@ -97,7 +93,8 @@
           "owen"
         ],
         "actions": [
-          "like"
+          "like",
+          "reply"
         ],
         "fixed": "p2,p3"
       },
@@ -109,7 +106,8 @@
           "owen"
         ],
         "actions": [
-          "like"
+          "like",
+          "reply"
         ],
         "fixed": "p2,p3"
       },
@@ -121,13 +119,18 @@
           "owen"
         ],
         "actions": [
-          "like"
+          "like",
+          "reply"
         ],
         "fixed": "p2,p3"
       }
     },
     "quotaNote": "10-20 拍板（kimi 复核建议+用户按推荐跑）：postsPerTargetPerDay=2/目标/天按维护号分账（butcher、wcixot 各自独立额度，不共享不挤占）；同帖去重仍全局（一帖只一号互动，v1.1 M3 防协同保留）；上限语义=每目标最多 2 帖/号/天×2 号=4 帖/天（低于 perTargetDailyCap 5）",
-    "matrixNote": "10-20 拍板（现在生效）：四自动化号互维护——每号维护自己以外全部四号（含 owen），owen 不维护任何人；固定 p2/p3 窗内执行；分账额度 2帖/目标/号/天 + 每目标总帽5/天 + 每号总帽3/天 + 互吹圈>1/3 跳过 + 同帖只一号"
+    "matrixNote": "10-20 用户终版：四号互维护（每号维护自身以外四号含 owen，owen 不维护人）；概率管量=点赞 0.8/回复 1/3 独立掷骰（两骰皆未中=该窗跳过该目标，LLM+质量门失败降级不重掷）；保险丝=3N（N=维护者数目，出收两端同标准，矩阵增减号自动跟随）；同帖全圈≤2 号；前置停留 20-45s+40% 顺访主页（11x+4x 不可见信号）；已移除：48h 时钟/自然互动门槛/互吹圈占比/一帖只一号/固定日帽",
+    "replyProbability": 0.3333,
+    "perPostRingCap": 2,
+    "likeProbability": 0.8,
+    "capFuseMultiplier": 3
   },
   "limits": {
     "activeHours": [

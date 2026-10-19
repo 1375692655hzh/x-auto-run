@@ -76,8 +76,10 @@ async function fetchOwnPosts(handle) {
   const qLen = Array.isArray(q) ? q.length : 0;
   const nextId = (n) => `${today()}-${WINDOW}-maint-${qLen + n}`;
 
-  // 维护号自身熔断 + 日帽（帽在目标循环内逐次复查——review P2-7：like+reply 各扣 1，两目标可越帽）
-  const capLeft = () => (M.perMaintainerDailyCap || 3) - loadMLed().filter((e) => e.account === ACCOUNT && e.at.slice(0, 10) === today()).length;
+  // 保险丝=3N（10-20 用户拍板：N=维护者数目，概率管量、硬帽只削运气波峰；矩阵增减号自动跟随）
+  const N_MAINTAINERS = Object.keys(M.maintainers || {}).length || 1;
+  const FUSE = (M.capFuseMultiplier != null ? M.capFuseMultiplier : 3) * N_MAINTAINERS;
+  const capLeft = () => FUSE - loadMLed().filter((e) => e.account === ACCOUNT && e.at.slice(0, 10) === today()).length;
   const ro = radarOk(me.handle);
   if (!ro.ok) { audit({ account: ACCOUNT, window: WINDOW, action: 'skip', note: '维护号熔断: ' + ro.why }); console.error('维护号熔断: ' + ro.why); process.exit(0); }
 
@@ -91,31 +93,36 @@ async function fetchOwnPosts(handle) {
     if (posts == null) { notes.push(`@${tAcct.handle} 轮询失败`); continue; }
     // 固定窗候选：帖龄 20min~14h + 计数正常 + 今日该目标未选满
     const now = Date.now();
+    // 同帖上限=全圈 ≤2 号（10-20 拍板放开：原"一帖只一号"掐死小号评论量；≤2 防 4 号围攻同帖的
+    // engagement pod 观感，完全放开只需调 config maintain.perPostRingCap）
+    const ringCap = M.perPostRingCap != null ? M.perPostRingCap : 2;
     const cands = posts.filter((p) => {
       const ageMin = (now - p.postAt) / 60000;
       return p.postAt && ageMin >= 20 && ageMin <= 14 * 60 && p.likes != null && p.replies != null;
-    }).filter((p) => !loadMLed().some((e) => e.statusId === p.statusId))
+    }).filter((p) => loadMLed().filter((e) => e.statusId === p.statusId).length < ringCap)
       .sort((a, b) => ((b.likes + b.replies) - (a.likes + a.replies)));
     // 每目标每日帖数=按维护号分账（10-20 拍板"按推荐跑"： butcher/wcixot 各自 2 帖/目标/天，
     // 不再跨号共享挤占——p2 窗 wcixot 先跑曾会把 butcher 挤到无帖可维护）；
     // 同帖去重仍是全局的（下方 statusId 过滤不分号）：一帖只被一个号互动，防多号围攻协同画像（v1.1 M3 保留）
     const selectedToday = new Set(loadMLed().filter((e) => e.account === ACCOUNT && e.targetHandle === tAcct.handle && e.at.slice(0, 10) === today()).map((e) => e.statusId)).size;
     if (selectedToday >= (M.postsPerTargetPerDay || 2)) { notes.push(`@${tAcct.handle} 今日已维护满${M.postsPerTargetPerDay}帖（本号额度）`); continue; }
-    // 每目标每日互动总帽（跨维护号，10-20 补：分账后维护号扩到 3-4 个时理论 2×N 会破 perTargetDailyCap 线；
-    // 矩阵按需调整（用户拍板"四号互维护自己以外的号"）后任何规模都由这里兜底）
+    // 目标侧保险丝同为 3N（10-20 拍板：单账号[收端]可见动作上限=维护者数目×3；期望 9.1 正常碰不到，只削波峰）
     const targetActionsToday = loadMLed().filter((e) => e.targetHandle === tAcct.handle && e.at.slice(0, 10) === today()).length;
-    if (targetActionsToday >= (M.perTargetDailyCap || 5)) { notes.push(`@${tAcct.handle} 今日已被各号合计维护 ${targetActionsToday} 次达总帽，本号跳过`); continue; }
+    if (targetActionsToday >= FUSE) { notes.push(`@${tAcct.handle} 今日收圈内维护 ${targetActionsToday} 次达保险丝(${FUSE})，本号跳过`); continue; }
     if (!cands.length) { notes.push(`@${tAcct.handle} 无新候选帖`); continue; }
     const p = cands[0]; // 每窗每目标 1 帖：p2+p3 两窗凑满 postsPerTargetPerDay
-    const natural = (p.likes || 0) + (p.replies || 0);
-    if (1 / Math.max(natural, 1) > (M.dominanceRatio || 0.34)) { notes.push(`帖${p.statusId.slice(-6)} 自然互动${natural}，维护会超1/3，跳过`); continue; }
+    // 10-20 用户终版拍板：概率管量（点赞 0.8 / 回复 1/3 独立掷骰），无自然互动门槛、无互吹圈占比、
+    // 无硬日帽（3N 保险丝除外）；两骰皆未中=本窗跳过该目标；LLM+质量门失败降级，不重掷
     const base = { kind: 'maintain', fixed: true, statusId: p.statusId, postUrl: `https://x.com/${tAcct.handle}/status/${p.statusId}`, targetHandle: tAcct.handle, postAt: p.postAt, createdAt: nowIso(), status: 'planned', window: WINDOW };
-    entries.push({ id: nextId(entries.length + 1), account: ACCOUNT, type: 'like', ...base });
-    appendMLed({ account: ACCOUNT, action: 'like', statusId: p.statusId, targetHandle: tAcct.handle, window: WINDOW });
-    let hasReply = false; // 逐目标标志（review P2-8：全数组 some 会把别的目标的回复算进来）
-    // 低频回复规则不变：48h 间隔 + 自然互动≥5，LLM+质量门失败不凑数
-    const lastReply = loadMLed().filter((e) => e.account === ACCOUNT && e.action === 'reply' && e.targetHandle === tAcct.handle);
-    if (capLeft() > 0 && (mCfg.actions || []).includes('reply') && Date.now() - (lastReply.length ? Date.parse(lastReply[lastReply.length - 1].at) : 0) > (M.replyMinGapHours || 48) * 3600000 && natural >= 5) {
+    const rollLike = Math.random() < (M.likeProbability != null ? M.likeProbability : 0.8);
+    const rollReply = (mCfg.actions || []).includes('reply') && Math.random() < (M.replyProbability != null ? M.replyProbability : 0.3333);
+    let did = [];
+    if (rollLike) {
+      entries.push({ id: nextId(entries.length + 1), account: ACCOUNT, type: 'like', ...base });
+      appendMLed({ account: ACCOUNT, action: 'like', statusId: p.statusId, targetHandle: tAcct.handle, window: WINDOW });
+      did.push('点赞');
+    }
+    if (rollReply) {
       const persona = (CFG.personas || {})[ACCOUNT];
       const brief = ((CFG.prompts || {}).visit || '') + '\n这是权重维护场景：对被维护账号的新帖做一条真诚、有信息量的回应。';
       const r = await generateReply({ post: p.text, author: tAcct.handle, persona, brief }).catch(() => null);
@@ -123,10 +130,10 @@ async function fetchOwnPosts(handle) {
       if (qc && qc.ok) {
         entries.push({ id: nextId(entries.length + 1), account: ACCOUNT, type: 'reply', text: qc.cleaned, ...base });
         appendMLed({ account: ACCOUNT, action: 'reply', statusId: p.statusId, targetHandle: tAcct.handle, window: WINDOW });
-        hasReply = true;
-      } else notes.push(`帖${p.statusId.slice(-6)} 回复生成未过质量门(${qc ? qc.reason : 'LLM失败'})，只点赞`);
+        did.push('回复');
+      } else notes.push(`帖${p.statusId.slice(-6)} 回复生成未过质量门(${qc ? qc.reason : 'LLM失败'})`);
     }
-    notes.push(`帖${p.statusId.slice(-6)} → ${ACCOUNT} 点赞${hasReply ? '+回复' : ''}（自然互动${natural}，帖龄${Math.round((now - p.postAt) / 60000)}min）`);
+    notes.push(did.length ? `帖${p.statusId.slice(-6)} → ${ACCOUNT} ${did.join('+')}（帖龄${Math.round((now - p.postAt) / 60000)}min）` : `帖${p.statusId.slice(-6)} 两骰皆未中(赞0.8/回1/3)，本窗跳过`);
   }
 
   if (!entries.length) { audit({ account: ACCOUNT, window: WINDOW, action: 'none', note: notes.join('；') || '无候选' }); console.log(notes.join('\n') || '无候选帖'); process.exit(0); }

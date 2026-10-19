@@ -81,7 +81,7 @@ const TASK_ROWS = [
   ...opsRows('p1', '09:35', 'fullwin', QF, { community: false, visit: false, maintain: false }),
   ...opsRows('p2', '12:35', 'fullwin', QF, { community: false, visit: false, maintain: false }),
   ...opsRows('p3', '19:35', 'fullwin', QF, { community: false, visit: false, maintain: false }),
-  { id: 'maintain', t: '12:35/19:35 窗内', cat: '主动互动', name: '权重维护互动（统一固定窗）', unit: '次', status: 'on', set: '≤1 帖/目标/窗 · ≤3 次/号/天（v1.1 拍板）', setNum: null, sug: '维护计入当日点赞/回复总帽', desc: '10-20 拍板：四自动化号互维护矩阵——每号维护自己以外全部四号（含 owen），owen 不维护人；固定 p2/p3 窗内执行；护栏=分账2帖/目标/号/天+每目标总帽5/天+每号总帽3/天+互吹圈>1/3跳过+同帖只一号' },
+  { id: 'maintain', t: '12:35/19:35 窗内', cat: '主动互动', name: '权重维护互动（统一固定窗）', unit: '次', status: 'on', set: '≤1 帖/目标/窗 · ≤3 次/号/天（v1.1 拍板）', setNum: null, sug: '维护计入当日点赞/回复总帽', desc: '10-20 终版：四号互维护（每号维护自身以外四号含 owen）；概率管量=点赞0.8/回复1/3独立掷骰；保险丝=3N（N=维护者数）；同帖全圈≤2号；前置停留+40%顺访主页（11x+4x不可见信号）；掷骰与质量门失败均降级不重掷' },
   { id: 'verifyReply', t: '已下线', cat: '系统运维', name: '回复可见性抽查（已下线）', unit: '次', status: 'off', set: '—', setNum: null, sug: '—', desc: '10-19 拍板下线：走 FxTwitter 路径不稳定易误判，回复可见性以雷达四维（ghost/deboost 两维即回复可见性检测）为准，每晚 03:20 半夜数据窗' },
   { id: 'passive', t: '随通知', cat: '被动回复', name: '回复他人的回复', unit: '', status: 'pending', set: '不限（你拍板）', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '别人在我们帖下的回复→回应；评论模块待接入' },
   { id: 'report', t: '22:05', cat: '系统运维', name: '每日日报', unit: '份', status: 'on', set: '1 份', setNum: 1, sug: '1/天（复盘频率；XActions 建议每日审计）', desc: '计划任务 Xops日报 自动生成' },

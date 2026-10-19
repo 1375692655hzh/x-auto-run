@@ -260,11 +260,32 @@ async function followUser(page, handle2) {
   if ((await page.$$('button[data-testid$="-follow"]')).length) return { ok: false, note: '点击后未生效' };
   return { ok: false, unknown: true, note: '结果未确认' };
 }
+// 维护前置序列（10-20 拍板，按源码权重表设计）：帖页停留 20-45s（停留=11x 最强被动信号）+
+// 40% 概率跳目标主页停 15-30s（主页访问=4x）再回来——两者对外不可见，不占任何可见动作帽
+async function maintainDwell(page, entry) {
+  try {
+    const dwell1 = 20000 + Math.floor(Math.random() * 25000);
+    await page.evaluate(() => window.scrollBy({ top: 200 + Math.floor(Math.random() * 300), behavior: 'smooth' })).catch(() => { });
+    await sleep(dwell1 * 0.5);
+    await page.evaluate(() => window.scrollBy({ top: -150, behavior: 'smooth' })).catch(() => { });
+    await sleep(dwell1 * 0.5);
+    if (Math.random() < 0.4 && entry.targetHandle) {
+      await page.evaluate((h) => { location.href = 'https://x.com/' + h; }, entry.targetHandle).catch(() => { });
+      await sleep(1500 + Math.floor(Math.random() * 3000));
+      await page.evaluate(() => window.scrollBy({ top: 300 + Math.floor(Math.random() * 400), behavior: 'smooth' })).catch(() => { });
+      await sleep(15000 + Math.floor(Math.random() * 15000));
+      await gotoFeed(page, entry.postUrl);
+      await sleep(1500);
+    }
+  } catch { }
+}
+
 async function likePost(page, entry) {
   if (!(await gotoFeed(page, entry.postUrl))) return { ok: false, note: '页面加载失败' };
   const art = await findArticleByStatus(page, entry.statusId);
   if (!art) return { ok: false, note: '按 statusId 未找到目标帖' };
   if (await art.$(SEL.unlike)) return { ok: true, note: '已赞过' };
+  if (entry.kind === 'maintain') await maintainDwell(page, entry); // 点赞前停留/顺访主页（不可见高权重信号）
   const btn = await art.$(SEL.like);
   if (!btn) return { ok: false, note: '点赞按钮未找到' };
   await humanClick(page, btn);

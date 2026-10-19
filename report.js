@@ -101,10 +101,17 @@ if (snap && snap.radar && snap.radar.fetchedAt) {
 for (const k of Object.keys(snap && snap.accounts || {})) if (snap.accounts[k].mutual) sysBits.push(`互关扫描 ${k} ${(snap.accounts[k].mutual.ratio * 100).toFixed(0)}%`);
 if (!sysBits.length) sysBits.push('半夜数据窗未跑/无产出');
 
+// ── 待你回（10-20 配合用户手动上 owen 回复）：今天我们四个号回复了 owen 哪些帖 ──
+let replyToOwen = [];
+try {
+  const mled = readJson(path.join(STATE_DIR, 'maintain-ledger.json')) || { actions: [] };
+  replyToOwen = (mled.actions || []).filter((e) => e.action === 'reply' && /owen/i.test(e.targetHandle || '') && e.at && new Date(Date.parse(e.at) + 8 * 3600000).toISOString().slice(0, 10) === DATE);
+} catch { }
+
 const md = `# 运营日报 ${DATE}
 
 ${sections}
-
+${replyToOwen.length ? `\n## 待你回（owen 手动环节）\n${replyToOwen.map((e) => `- ${e.account} 回了 owen 的帖：https://x.com/${e.targetHandle}/status/${e.statusId}（你去回他 → 成串拿 75 分作者互动权重）`).join('\n')}` : ''}
 ---
 系统：${sysBits.join(' · ')}｜任务面=半夜数据窗 03:20 + 三运营窗×两号（09:35/12:35/19:35）+ 指标日检/晚检 + 日报
 
