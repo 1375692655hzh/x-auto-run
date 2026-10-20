@@ -103,7 +103,7 @@
     "sessionMaxMinutes": 20,
     "consecutiveFailAbort": 3,
     "skipMediaReplies": true,
-    "skipMediaRepliesNote": "10-20 深夜用户拍板：没有图片才回复帖子——带图/视频帖我们看不到图，回复必违和；互关扫描淘汰、串门取对方最新无媒体帖、维护回复骰中降级只点赞不重掷。点赞/关注不受影响",
+    "skipMediaRepliesNote": "10-20 深夜用户拍板（全局三账号 butcher/wcixot/fullwin，非单一账号）：没有图片/视频才回复帖子——带媒体帖我们看不到图，回复必违和；互关扫描淘汰、串门取对方最新无媒体帖、维护回复骰中降级只点赞不重掷、fullwin 巡逻过滤。点赞/关注/光速回复（回复我们的人）不受影响",
     "communityAuthorCooldownDays": 14,
     "templateCooldownDays": 7,
     "templateCooldownPolicy": "soft",

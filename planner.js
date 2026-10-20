@@ -191,7 +191,7 @@ async function collectPosts(page, limit) {
         time: time ? time.getAttribute('datetime') : null,
         text: text ? clean(text.textContent).slice(0, 300) : '',
         author: nameEl ? nameEl.getAttribute('href').replace(/^\//, '').toLowerCase() : null,
-        hasPhoto: !!art.querySelector('[data-testid="tweetPhoto"]'), // 10-20 拍板"没有图片才回复帖子"：带图帖在互关过滤层淘汰
+        hasMedia: !!art.querySelector('[data-testid="tweetPhoto"], [data-testid="videoPlayer"]'), // 10-20 拍板"没有图片/视频才回复帖子"（全局三账号）：带媒体帖在互关过滤层淘汰
         locked: [...art.querySelectorAll('button, [role="button"]')].some((b) => /subscribe to unlock|订阅.{0,2}解锁|ロック解除/i.test((b.textContent || '').trim())),
       };
     }).filter((p) => p.id && p.link);
@@ -232,14 +232,14 @@ async function planCommunity(ts) {
       const posts = await collectPosts(page, R.scanPosts || 30);
       // 10-20 用户拍板"按建议执行"拆除：关键词过滤/作者14天冷却/帖龄3天上限/同批同作者单条——
       // 互关要求=话题页的帖就回；保留的硬正确：自家号排除、订阅帖（用户旧规）、已回过的帖去重
-      // 10-20 深夜追加（拍板"没有图片才回复帖子"）：带图帖淘汰（看不到图，回复必违和）
+      // 10-20 深夜追加（拍板"没有图片/视频才回复帖子"，全局三账号）：带媒体帖淘汰（看不到图/视频，回复必违和）
       const SKIP_MEDIA = (CFG.limits || {}).skipMediaReplies !== false;
-      const rej = { 自家号: 0, 锁定帖: 0, 已回过帖: 0, 带图帖: 0 };
+      const rej = { 自家号: 0, 锁定帖: 0, 已回过帖: 0, 带媒体帖: 0 };
       const fresh = posts.filter((p) => {
         if (!p.author) return false;
         if (OWN.has(p.author)) { rej.自家号++; return false; }
         if (p.locked) { rej.锁定帖++; return false; }
-        if (SKIP_MEDIA && p.hasPhoto) { rej.带图帖++; return false; }
+        if (SKIP_MEDIA && p.hasMedia) { rej.带媒体帖++; return false; }
         if (ts.repliedPosts[p.id]) { rej.已回过帖++; return false; }
         return true;
       });

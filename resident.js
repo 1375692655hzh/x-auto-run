@@ -183,6 +183,7 @@ async function collectPosts(page, limit = 30) {
         time: time ? time.getAttribute('datetime') : null,
         author: nameEl ? (nameEl.getAttribute('href') || '').replace('/', '').split('/')[0] : null,
         text: text ? clean(text.textContent).slice(0, 280) : '',
+        hasMedia: !!art.querySelector('[data-testid="tweetPhoto"], [data-testid="videoPlayer"]'), // 10-20 拍板"没有图片/视频才回复帖子"（全局三账号）：带媒体帖巡逻不回
         locked,
       };
     }).filter((p) => p.id && p.author);
@@ -333,7 +334,8 @@ if (WATCHDOG) {
       await sleep(3000);
       for (let i = 0; i < 3; i++) { await pageTopic.evaluate(() => window.scrollBy({ top: 600 + Math.floor(Math.random() * 400), behavior: 'smooth' })).catch(() => { }); await sleep(rand(800, 1500)); }
       const posts = await collectPosts(pageTopic, 25);
-      const fresh = posts.filter((p) => !st.seenPosts[p.id] && !OWN.has((p.author || '').toLowerCase()) && !p.locked);
+      const skipMedia = (CFG.limits || {}).skipMediaReplies !== false; // 10-20 拍板：带图/视频帖不回复（全局规则，非单账号）
+      const fresh = posts.filter((p) => !st.seenPosts[p.id] && !OWN.has((p.author || '').toLowerCase()) && !p.locked && !(skipMedia && p.hasMedia));
       for (const p of posts) st.seenPosts[p.id] = nowIso();
       st.material = posts.map((p) => ({ id: p.id, author: p.author, text: p.text, time: p.time })).slice(0, 12); // 页3 素材（近 1h 参考用）
       // 同作者每轮只取一条（10-20 拍板方案二）：先按作者去重再取每轮上限，活跃作者（顶帖党）一轮最多吃一条
