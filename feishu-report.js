@@ -51,23 +51,31 @@ async function push(text) {
   // ── 数据聚合 ──
   const snap = readJson(path.join(STATE_DIR, 'health-snapshots', `${today()}.json`), null) || readJson(path.join(STATE_DIR, 'health-snapshots', `${new Date(Date.now() - 86400000).toISOString().slice(0, 10)}.json`), null);
   const accounts = (CFG.accounts || []).filter((a) => a.role !== 'observer');
-  const cut = new Date(); cut.setHours(0, 0, 0, 0);
-  const cutMs = cut.getTime();
 
   const lines = [];
   lines.push(`📊 X 运营项目运行报告（${nowBj()}｜${freshNote}）`);
 
   for (const a of accounts) {
     const led = readJson(path.join(STATE_DIR, `ledger-${a.key}.json`), { actions: {}, meta: {} });
-    const cnt = (k) => ((led.actions || {})[k] || []).filter((t) => t > cutMs).length;
+    const cnt = (k) => ((led.actions || {})[k] || []).filter((t) => t > Date.now() - 6 * 3600000).length; // 滚动近 6h（10-21 拍板：6h 报告配 6h 窗，不再零点清零式累计）
     const radar = snap && snap.radar && snap.radar.results && snap.radar.results[a.handle];
     const rf = radar && radar.four && Object.values(radar.four).some((v) => v != null)
       ? `${radar.four.score || '?'}分${['ghost', 'deboost', 'search', 'suggestion'].filter((k) => radar.four[k] && !/未见/.test(radar.four[k])).length ? '⚠有受限' : '全绿'}` : '无数据';
     const foll = snap && snap.accounts && snap.accounts[a.key] && snap.accounts[a.key].profile && snap.accounts[a.key].profile.followers;
+    // 环比基线=昨日收盘（昨日快照文件的最后写入值）；基线缺失如实标注；百分比仅基数≥100 时显示（新号百分比失真）
+    const ySnap = readJson(path.join(STATE_DIR, 'health-snapshots', `${new Date(Date.now() - 86400000).toISOString().slice(0, 10)}.json`), null);
+    const yFoll = ySnap && ySnap.accounts && ySnap.accounts[a.key] && ySnap.accounts[a.key].profile && ySnap.accounts[a.key].profile.followers;
+    let fanLine;
+    if (foll == null) fanLine = '粉丝 ?';
+    else if (yFoll == null) fanLine = `粉丝 ${foll}（基线缺失）`;
+    else {
+      const delta = foll - yFoll;
+      fanLine = `粉丝 ${foll}（较昨日收盘 ${delta >= 0 ? '+' : ''}${delta}${yFoll >= 100 ? `，${delta >= 0 ? '+' : ''}${(delta / yFoll * 100).toFixed(1)}%` : ''}）`;
+    }
     const aborted = led.meta && led.meta.abortedToday === today();
     lines.push(`\n@${a.handle}`);
-    lines.push(`  粉丝 ${foll ?? '?'} | 雷达 ${rf}${aborted ? ' | ⛔今日已熔断' : ''}`);
-    lines.push(`  今日动作: 帖${cnt('post')} 回复${cnt('reply')} 关注${cnt('follow')} 赞${cnt('like')}${cnt('postTopic') ? `（互关帖${cnt('postTopic')}/云帖${cnt('postCloud')}）` : ''}`);
+    lines.push(`  ${fanLine} | 雷达 ${rf}${aborted ? ' | ⛔今日已熔断' : ''}`);
+    lines.push(`  近6h动作: 帖${cnt('post')} 回复${cnt('reply')} 关注${cnt('follow')} 赞${cnt('like')}${cnt('postTopic') ? `（互关帖${cnt('postTopic')}/云帖${cnt('postCloud')}）` : ''}`);
   }
 
   // fullwin 常驻状态
@@ -75,19 +83,21 @@ async function push(text) {
   const hbAge = rs && rs.heartbeatAt ? Math.round((Date.now() - Date.parse(rs.heartbeatAt)) / 60000) : -1;
   lines.push(`\n🏠 fullwin 常驻：${hbAge >= 0 ? (hbAge < 20 ? `✅心跳 ${hbAge}min前` : `❌心跳超时 ${hbAge}min前`) : '未在运行（人工时段）'}`);
 
-  // 卡点=今日异常条目
+  // 卡点=近 6 小时异常条目（与动作量同窗，6h 脉冲口径）
   const logFile = path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`);
   let abnormal = [];
+  const cut6h = Date.now() - 6 * 3600000;
   try {
     for (const l of fs.readFileSync(logFile, 'utf8').trim().split('\n')) {
       let j; try { j = JSON.parse(l); } catch { continue; }
-      if (!j.at || Date.parse(j.at) < cutMs - 8 * 3600000) continue; // 北京零点起
+      const tMs = Date.parse(j.at || '');
+      if (!Number.isFinite(tMs) || tMs < cut6h) continue;
       if (j.dry) continue;
       if (j.status === 'failed' || j.action === 'loopError' || j.action === 'abort') abnormal.push(`${(j.account || '').slice(0, 8)} ${j.action || ''} ${(j.note || j.result || '').slice(0, 30)}`);
     }
   } catch { }
   abnormal = abnormal.slice(-6);
-  lines.push(`\n🚧 卡点（今日异常 ${abnormal.length ? '' : '：无'}）`);
+  lines.push(`\n🚧 卡点（近6h异常${abnormal.length ? '' : '：无'}）`);
   if (abnormal.length) lines.push(abnormal.map((x) => '  · ' + x).join('\n'));
 
   const text = lines.join('\n');
