@@ -32,10 +32,11 @@ async function callProvider(name, p, { messages, temperature = 0.9, maxTokens = 
   } finally { clearTimeout(tm); }
 }
 
-/** 按主备链调用；全部失败抛错（错误信息聚合各家原因） */
+/** 按主备链调用；全部失败抛错（错误信息聚合各家原因）；opts.provider 可锁定单通道（10-20 拍板：fullwin 常驻走 mimo） */
 async function chat(opts = {}) {
-  const chain = providerChain();
-  if (!chain.length) throw new Error('llm.json 无可用通道');
+  let chain = providerChain();
+  if (opts.provider) chain = chain.filter(([n]) => n === opts.provider);
+  if (!chain.length) throw new Error(opts.provider ? `llm.json 无 ${opts.provider} 通道或未配 key` : 'llm.json 无可用通道');
   const errs = [];
   for (const [name, p] of chain) {
     try { return await callProvider(name, p, opts); }
@@ -52,7 +53,7 @@ async function chat(opts = {}) {
  * - brief: 本次任务补充要求（如"正向留言，引导互相串门"）
  * - history: 我方近期已发回复列表（防重复，取末尾 5 条）
  */
-async function generateReply({ post, author, persona, brief, history = [] }) {
+async function generateReply({ post, author, persona, brief, history = [], channel }) {
   if (!post || !persona) throw new Error('generateReply 需要 post 与 persona');
   const system = [
     `你是 X(Twitter) 账号的运营者本人，用第一人称回复别人的帖子。`,
@@ -74,7 +75,7 @@ async function generateReply({ post, author, persona, brief, history = [] }) {
     '',
     '写出回复：',
   ].filter(Boolean).join('\n');
-  return chat({ messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.9, maxTokens: 256 });
+  return chat({ messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.9, maxTokens: 256, provider: channel });
 }
 
 module.exports = { chat, generateReply };

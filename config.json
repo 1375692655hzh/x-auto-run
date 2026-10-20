@@ -110,19 +110,6 @@
           "reply"
         ],
         "fixed": "p2,p3"
-      },
-      "fullwin": {
-        "targets": [
-          "butcher",
-          "wcixot",
-          "maccostin",
-          "owen"
-        ],
-        "actions": [
-          "like",
-          "reply"
-        ],
-        "fixed": "p2,p3"
       }
     },
     "quotaNote": "10-20 拍板（kimi 复核建议+用户按推荐跑）：postsPerTargetPerDay=2/目标/天按维护号分账（butcher、wcixot 各自独立额度，不共享不挤占）；同帖去重仍全局（一帖只一号互动，v1.1 M3 防协同保留）；上限语义=每目标最多 2 帖/号/天×2 号=4 帖/天（低于 perTargetDailyCap 5）",
@@ -587,6 +574,49 @@
     "wcixot": {
       "visit": "串门场景：去关系池对象（近期真互动过的熟人）的最新帖下留一条真诚、具体的评论。口吻=技术面分析师视角：若对方内容涉及行情/标的，可从趋势、结构、量价或风险角度自然切入一两句；若是生活内容就真诚回应不复读术语。禁止套话空话，禁止无结尾标点的截断句。",
       "community": "互关话题场景：在互关话题帖下留一条真诚评论并引导互关。口吻=技术面分析师：可从帖子的市场观点切入（若涉及行情），再自然表达交个朋友互相学习；不谎称已关注（系统会先关注后回复，但若关注失败该条会跳过不发）。禁止复读式欢迎，禁止无结尾标点。"
+    }
+  },
+  "resident": {
+    "fullwin": {
+      "startHour": 8,
+      "endHour": 23,
+      "replyPollMin": 5,
+      "replyDelayMin": [
+        1,
+        10
+      ],
+      "patrolTopic": "蓝V互关",
+      "patrolGapMin": [
+        8,
+        15
+      ],
+      "patrolPerRound": 4,
+      "postGapMin": [
+        60,
+        85
+      ],
+      "postTags": [
+        "#蓝V互关",
+        "#蓝朋友",
+        "#浇朋友",
+        "#浇个朋友",
+        "#交个朋友",
+        "#交朋友"
+      ],
+      "cloudSlots": [
+        "09:35",
+        "12:35",
+        "19:35"
+      ],
+      "cloudGapMin": [
+        2,
+        8
+      ],
+      "llmChannel": "mimo",
+      "postCapDay": 35,
+      "replyCapDay": 60,
+      "followCapDay": 100,
+      "note": "10-20 拍板常驻形态：一窗三页（光速回复5min轮询延迟1-10min/#蓝V互关巡逻8-15min每轮≤4无日帽/互关帖1h±0-25min）；云端内容照常并入；LLM 锁 mimo；自家矩阵号的通知不自动回（用户手动）"
     }
   }
 }
