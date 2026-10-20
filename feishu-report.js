@@ -74,7 +74,8 @@ async function push(text) {
     }
     const aborted = led.meta && led.meta.abortedToday === today();
     lines.push(`\n@${a.handle}`);
-    lines.push(`  ${fanLine} | 雷达 ${rf}${aborted ? ' | ⛔今日已熔断' : ''}`);
+    lines.push(`  ${fanLine}${aborted ? ' | ⛔今日已熔断' : ''}`);
+    lines.push(`  雷达 ${rf}`);
     lines.push(`  近6h动作: 帖${cnt('post')} 回复${cnt('reply')} 关注${cnt('follow')} 赞${cnt('like')}${cnt('postTopic') ? `（互关帖${cnt('postTopic')}/云帖${cnt('postCloud')}）` : ''}`);
   }
 
