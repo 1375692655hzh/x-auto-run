@@ -190,8 +190,8 @@ async function collectPosts(page, limit = 30) {
 }
 
 // ── 动作隔离与瞬态重试（10-20：巡逻 8/8 轮协议挂起的修复） ──
-async function withTempPage(fn) {
-  const pg = await browser.newPage();
+async function withTempPage(bro, fn) { // bro=浏览器实例由调用方传入（模块级定义拿不到主流程的 browser——14:14 实战踩坑）
+  const pg = await bro.newPage();
   await pg.setViewport({ width: 1400 + randi(0, 80), height: 900 });
   try { return await fn(pg); } finally { try { await pg.close(); } catch { } }
 }
@@ -324,11 +324,11 @@ if (WATCHDOG) {
         if (DRY) { LOG(`[DRY] 应评论 @${p.author}: ${qc.cleaned.slice(0, 30)}…`); continue; }
         // 动作隔离（10-20 用户建议）：每个动作独立临时页+用完即关，与搜索页状态彻底解耦；瞬态错误重试一次
         const postUrl = 'https://x.com' + (p.link || ('/i/web/status/' + p.id));
-        let rr = await withTempPage((pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned)));
+        let rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned)));
         if (rr.ok || rr.unknown) { ledgerRecord('reply'); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
         else audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: 'failed', note: rr.note });
         if (rr.ok && usedToday('follow') < RC.followCapDay) {
-          const fo = await withTempPage((pg) => retryTransient(() => followOnPage(pg, p.author)));
+          const fo = await withTempPage(browser, (pg) => retryTransient(() => followOnPage(pg, p.author)));
           if (fo.ok) { ledgerRecord('follow'); audit({ action: 'follow', target: p.author, note: '巡逻回复后关注' }); }
           else audit({ action: 'follow', target: p.author, status: 'failed', note: fo.note });
         }
@@ -352,9 +352,8 @@ if (WATCHDOG) {
       if (!(qc && qc.ok)) { audit({ action: 'hourlyGen', note: `生成未过门(${qc ? qc.reason : 'LLM失败'})` }); return; }
       if (DRY) { LOG(`[DRY] 应发互关帖: ${qc.cleaned.slice(0, 40)}… + 标签组`); return; }
       // 标签强制程序化附加（10-20 事故：LLM 系统提示禁标签+质量门剥标签双重绞杀致互关帖裸发）——确定性拼接，不依赖 LLM/质量门
-      const postText = (qc.cleaned || '').trim().replace(/[#＃][^s＃#，。！？、]+/g, '').trim() + '
-
-' + RC.postTags.join(' ');
+      const tagless = (qc.cleaned || '').trim().replace(/[＃#][^\s＃#，。！？、]+/g, '').trim();
+      const postText = tagless + '\n\n' + RC.postTags.join(' ');
       const rr = await postOnPage(pagePost, postText);
       if (rr.ok || rr.unknown) { ledgerRecord('post'); audit({ action: 'hourlyPost', status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 50), note: rr.note }); LOG('页3：互关帖已发'); }
       else audit({ action: 'hourlyPost', status: 'failed', note: rr.note });
