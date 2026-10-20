@@ -352,6 +352,7 @@ function recordReply(entry) {
 // ── 主流程 ───────────────────────────────────────────────
 const LEDGER = loadLedger();
 let sessionAborted = false;
+let PRE_EXISTING_PAGES = null; // 会话进入前既有页签（10-21：清理时避开别人工位）
 
 // 发布独立原创帖（2026-10-16 补全；compose 页与回复共用输入/提交/成功气泡机制）
 async function postTweet(page, text) {
@@ -448,6 +449,8 @@ function executeAction(page, entry) {
     if (!SIMULATE) {
       ws = await openWindow(ACCT.profileId);
       browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
+      // 记录进入前的既有页签（10-21 修复：窗口可能被常驻进程/其他任务占用，清理时只能关自己新开的，别拆别人工位）
+      try { PRE_EXISTING_PAGES = new Set(await browser.pages()); } catch { PRE_EXISTING_PAGES = new Set(); }
       page = await browser.newPage();
       page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开（10-20 全天协议超时根因）
       await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
@@ -578,8 +581,17 @@ function executeAction(page, entry) {
     // 会留下别人的页签→累积 22 个。改为全量清理；
     // 10-19 二次修复：必须留 1 页——比特浏览器 syncTabs 会把开着的页签回写进窗口配置的
     // 启动页 url，每次开窗全部复活，越积越多（owen 曾 11 页）。留 1 页 + 启动页配置单一化，双保险）
+    // 10-21 三次修复：只关"本次会话新开的"页签（PRE_EXISTING_PAGES 之外的）——窗口被常驻/其他任务
+    // 占用时，别拆别人工位；历史遗留空页签（窗口开的首次会话里没有 PRE_EXISTING）照清不误
     if (browser) {
-      try { const allPages = await browser.pages(); for (let i = 1; i < allPages.length; i++) { try { await allPages[i].close(); } catch { } } } catch { }
+      try {
+        const allPages = await browser.pages();
+        for (const p of allPages) {
+          if (PRE_EXISTING_PAGES && PRE_EXISTING_PAGES.has(p)) continue; // 别人的工位，不碰
+          if (allPages.length === 1) break; // 至少留 1 页
+          try { await p.close(); } catch { }
+        }
+      } catch { }
       await browser.disconnect();
     }
     if (ws) await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { });
