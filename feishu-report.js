@@ -15,6 +15,18 @@ const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(
 const nowBj = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(5, 16).replace('T', ' ');
 const readJson = (p, d) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return d; } };
 
+// ── 推送双通道（10-21：飞书群 + Grok bot webhook，一边失败不连坐另一边） ──
+async function pushCursor(text) {
+  const r = await fetch(FS.cursor.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + FS.cursor.token },
+    body: JSON.stringify({ text }),
+    signal: AbortSignal.timeout(20000),
+  });
+  const t = await r.text().catch(() => '');
+  if (!r.ok) throw new Error('cursor webhook http ' + r.status + ': ' + t.slice(0, 100));
+  return t.slice(0, 80);
+}
 // ── 飞书推送（自建应用：tenant_access_token → im/v1/messages） ──
 async function push(text) {
   const tk = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
@@ -81,6 +93,8 @@ async function push(text) {
   const text = lines.join('\n');
   console.log(text);
   if (DRY) { console.log('\n[DRY] 未推送'); return; }
-  await push(text);
-  console.log('\n✅ 已推送到飞书群');
+  const [fR, cR] = await Promise.allSettled([push(text), pushCursor(text)]);
+  if (fR.status === 'fulfilled') console.log('\n✅ 飞书群已推送'); else console.error('\n❌ 飞书推送失败:', fR.reason && fR.reason.message);
+  if (cR.status === 'fulfilled') console.log('✅ Grok bot webhook 已推送'); else console.error('❌ Grok webhook 失败:', cR.reason && cR.reason.message);
+  if (fR.status === 'rejected' && cR.status === 'rejected') throw new Error('两通道全部失败');
 })().catch((e) => { console.error('报告失败:', e.message); process.exit(1); });
