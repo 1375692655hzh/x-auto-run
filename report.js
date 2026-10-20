@@ -32,7 +32,10 @@ try {
     if (!Number.isFinite(atMs)) continue;
     const bjDay = new Date(atMs + 8 * 3600000).toISOString().slice(0, 10);
     if (bjDay !== DATE) continue;
-    if (j.task !== 'executor' || j.action !== 'execute') continue;
+    if (j.task !== 'executor' || j.action !== 'execute') {
+      // 互关帖（10-21 拍板，mutual-post.js 独立脚本）：按同口径计入原创发帖
+      if (!(j.task === 'mutualPost' && j.action === 'post')) continue;
+    }
     const b = bucket(j.account);
     if (j.status === 'unknown') { b.unknown.push(`${(j.id || '').slice(11)} ${j.type}${j.note ? '：' + String(j.note).slice(0, 40) : ''}`); continue; }
     if (j.status === 'failed') { b.failed.push(`${(j.id || '').slice(11)} ${String(j.note || '').slice(0, 40)}`); continue; }
