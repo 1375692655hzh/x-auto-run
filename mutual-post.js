@@ -24,7 +24,7 @@ const argOf = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 ? argv
 const PREFAB = argv.includes('--prefab');
 const SLOT = argOf('slot', null); // am|mid|pm
 const DRY = argv.includes('--dry');
-const MP = Object.assign({ accounts: ['butcher', 'wcixot'], slots: { am: 0, mid: 1, pm: 2 }, tags: ['#蓝V互关', '#蓝朋友', '#浇朋友', '#浇个朋友', '#交个朋友', '#交朋友'], jitterMin: [[0, 15], [20, 35]] }, CFG.mutualPost || {});
+const MP = Object.assign({ accounts: ['butcher', 'wcixot'], slots: { am: 0, mid: 1, pm: 2 }, tags: ['#蓝V互关', '#蓝朋友', '#浇朋友', '#浇个朋友', '#交个朋友', '#交朋友'], jitterMin: { butcher: [0, 15], wcixot: [20, 35] } }, CFG.mutualPost || {});
 const ACCOUNTS = argOf('account', null) ? [argOf('account')] : MP.accounts;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -257,10 +257,11 @@ async function postSlot(acc, slot) {
   if (!SLOT || MP.slots[SLOT] == null) { console.error('用法: --prefab 或 --slot am|mid|pm [--account X] [--dry]'); process.exit(1); }
   const t0 = Date.now();
   for (let i = 0; i < ACCOUNTS.length; i++) {
-    const j = MP.jitterMin[Math.min(i, MP.jitterMin.length - 1)];
+    const acc = ACCOUNTS[i];
+    const j = MP.jitterMin[acc] || [0, 15]; // 抖动按账号键（10-21 拍板"按账号运行"：每号独立任务独立进程，抖动跟随账号不跟随循环序）
     const waitMin = rand(j[0], j[1]);
     const sleepMs = Math.max(0, waitMin * 60000 - (Date.now() - t0));
-    if (!DRY && sleepMs > 0) { console.log(`[${ACCOUNTS[i]}] 槽内随机延迟 ${(sleepMs / 60000).toFixed(1)} 分钟`); await sleep(sleepMs); }
-    await postSlot(ACCOUNTS[i], SLOT);
+    if (!DRY && sleepMs > 0) { console.log(`[${acc}] 槽内随机延迟 ${(sleepMs / 60000).toFixed(1)} 分钟`); await sleep(sleepMs); }
+    await postSlot(acc, SLOT);
   }
 })().catch((e) => { console.error(e.message || e); process.exit(1); });
