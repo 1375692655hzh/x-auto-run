@@ -238,10 +238,10 @@ if (WATCHDOG) {
   const browser = await puppeteer.connect({ browserWSEndpoint: j.data.ws, defaultViewport: null, protocolTimeout: 90000 });
   try { const ps0 = await browser.pages(); for (let i = 1; i < ps0.length; i++) { try { await ps0[i].close(); } catch { } } } catch { } // 清理上次异常退出留下的孤儿页
   const pageReply = await browser.newPage(); await pageReply.setViewport({ width: 1400 + randi(0, 120), height: 900 });
-  const pageTopic = await browser.newPage(); await pageTopic.setViewport({ width: 1400 + randi(0, 120), height: 900 });
   const pagePost = await browser.newPage(); await pagePost.setViewport({ width: 1400 + randi(0, 120), height: 900 });
-  // 三个常驻页全部自动应答模态框（beforeunload"离开此网站"等）——10-20 全天协议超时根因
-  for (const pg of [pageReply, pageTopic, pagePost]) pg.on('dialog', (d) => d.accept().catch(() => { }));
+  // pageTopic 已拆（10-21：巡逻改纯云端池驱动，常驻搜索页消失——窗口从三页降两页）
+  // 常驻页全部自动应答模态框（beforeunload"离开此网站"等）——10-20 全天协议超时根因
+  for (const pg of [pageReply, pagePost]) pg.on('dialog', (d) => d.accept().catch(() => { }));
   await pageReply.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { });
   if (!(await verifyLogin(pageReply, ACCT.handle))) { console.error('登录态校验失败'); await cleanup(); process.exit(1); }
 
@@ -326,22 +326,28 @@ if (WATCHDOG) {
     } catch (e) { LOG('页1 轮询异常: ' + String(e.message).slice(0, 60)); }
   }
 
-  // ── 页2：话题巡逻（#蓝V互关 新帖评论） ──
+  // ── 页2：话题巡逻（纯云端池驱动，10-21 拍板"原有路径直接清了"）：浏览器搜索页扫描与常驻 pageTopic 已删除——池失败=本轮跳过+留痕，绝不留暗兜
+  const XM = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'x-mutual.json'), 'utf8')); } catch { return null; } })();
+  async function poolPosts(hours, limit) {
+    const r = await fetch(`${XM.base}/v1/posts?hours=${hours}&limit=${limit}&exclude_rt=1`, { headers: { Authorization: 'Bearer ' + XM.key }, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error('云端池 http ' + r.status);
+    const d = await r.json();
+    return (d.posts || []).filter((p) => p && p.text && p.author && p.author.username && !p.is_retweet)
+      .sort((a, b) => (((b.metrics || {}).like_count || 0) + ((b.metrics || {}).reply_count || 0)) - (((a.metrics || {}).like_count || 0) + ((a.metrics || {}).reply_count || 0)))
+      .map((p) => ({ id: p.id, author: p.author.username, text: String(p.text).replace(/\s+/g, ' ').trim().slice(0, 280), time: p.created_at, link: (p.url || '').replace('https://x.com', ''), url: p.url, locked: false, hasMedia: false }));
+  }
   async function patrol() {
     try {
-      await pageTopic.goto(`https://x.com/search?q=${encodeURIComponent('#' + RC.patrolTopic)}&f=live`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await pageTopic.waitForSelector(SEL.article, { timeout: 30000 }).catch(() => { });
-      await sleep(3000);
-      for (let i = 0; i < 3; i++) { await pageTopic.evaluate(() => window.scrollBy({ top: 600 + Math.floor(Math.random() * 400), behavior: 'smooth' })).catch(() => { }); await sleep(rand(800, 1500)); }
-      const posts = await collectPosts(pageTopic, 25);
-      const skipMedia = (CFG.limits || {}).skipMediaReplies !== false; // 10-20 拍板：带图/视频帖不回复（全局规则，非单账号）
-      const fresh = posts.filter((p) => !st.seenPosts[p.id] && !OWN.has((p.author || '').toLowerCase()) && !p.locked && !(skipMedia && p.hasMedia));
+      let posts;
+      try { posts = await poolPosts(4, 30); LOG(`页2：云端池 ${posts.length} 条（4h窗口，按互动热度排序）`); }
+      catch (e) { LOG(`页2：云端池失败(${String(e.message).slice(0, 50)})，本轮跳过`); audit({ action: 'patrolSource', source: 'api-fail', note: String(e.message).slice(0, 60) }); return; }
+      const fresh = posts.filter((p) => !st.seenPosts[p.id] && !OWN.has((p.author || '').toLowerCase()));
       for (const p of posts) st.seenPosts[p.id] = nowIso();
       st.material = posts.map((p) => ({ id: p.id, author: p.author, text: p.text, time: p.time })).slice(0, 12); // 页3 素材（近 1h 参考用）
       // 同作者每轮只取一条（10-20 拍板方案二）：先按作者去重再取每轮上限，活跃作者（顶帖党）一轮最多吃一条
       const seenAuth = new Set();
       const take = fresh.filter((p) => { const a = (p.author || '').toLowerCase(); if (seenAuth.has(a)) return false; seenAuth.add(a); return true; }).slice(0, RC.patrolPerRound);
-      LOG(`页2：#${RC.patrolTopic} 本轮新帖 ${fresh.length} 条，取 ${take.length} 条评论`);
+      LOG(`页2：新帖 ${fresh.length} 条，取 ${take.length} 条评论`);
       for (const p of take) {
         if (aborted) break; // 回复总量帽已拆（10-20 拍板'回复不需要帽子'）；单用户上限见 userReplyCount
         if (!userCapOk(p.author)) { audit({ action: 'patrolSkip', target: p.author, note: '单用户回复上限' }); continue; }

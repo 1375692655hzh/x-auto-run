@@ -204,54 +204,33 @@ async function planCommunity(ts) {
   if (cap <= 0 && !DIAG) { console.log('互关额度已满'); return []; }
   const scanCap = DIAG ? 99 : cap; // 诊断模式不受配额门（排查看的是供给，不是额度）
   const hour = new Date().getHours();
-  if (hour < L.activeHours[0] || hour >= L.activeHours[1]) { console.log('不在执行窗，互关扫描跳过（守窗）'); return []; }
+  if (!DIAG && (hour < L.activeHours[0] || hour >= L.activeHours[1])) { console.log('不在执行窗，互关扫描跳过（守窗）'); return []; } // DIAG 诊断不限时
   const tags = CFG.task2.hashtags;
-  // 每窗多话题扫描凑配额（10-20 修复：原"一轮一话题"使整窗配额押在单话题瞬时状态上——
-  // wcixot p1 轮到干涸的 #浇朋友 7 条全筛 → 0/14 事故；K3 原设计本就是轮换多话题）
-  // 10-20 深夜二次加固（交付必达）：topicsPerScan=3 是下限不是上限——没凑满 cap+3 就轮完全部话题，杜绝"3 话题同时干涸"死角
-  const topicsPerScan = Math.max(1, (CFG.task2 || {}).topicsPerScan || 3);
-  const maxTopics = Math.max(topicsPerScan, tags.length);
-  const ws = await openWindow(ACCT.profileId);
-  let cands = [];
+  // 云端池候选（10-21 拍板"原有路径直接清了"）：浏览器话题扫描整块删除——池失败/无候选=本轮跳过+留痕，不留暗兜
+  let cands = null;
   try {
-    const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
-    const page = await browser.newPage();
-    page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开
-    try {
-      await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
-      await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
-      if (!(await verifyLogin(page, ACCT.handle))) throw new Error('登录态校验失败');
-      for (let ti = 0; ti < maxTopics; ti++) {
-        if (!DIAG && cands.length >= cap + 3 && ti >= topicsPerScan) break; // 凑够下限后才允许提前收；未凑满轮完全部话题
-        const tag = tags[ts.tagIndex % tags.length];
-        ts.tagIndex += 1; saveTaskstate(ts);
-      await page.goto(`https://x.com/search?q=${encodeURIComponent('#' + tag)}&f=live`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForSelector('article[data-testid="tweet"]', { timeout: 45000 }).catch(() => { });
-      await sleep(3000);
-      for (let i = 0; i < 4; i++) { await humanScroll(page, rand(700, 1100)); await sleep(rand(600, 1200)); }
-      const posts = await collectPosts(page, R.scanPosts || 30);
-      // 10-20 用户拍板"按建议执行"拆除：关键词过滤/作者14天冷却/帖龄3天上限/同批同作者单条——
-      // 互关要求=话题页的帖就回；保留的硬正确：自家号排除、订阅帖（用户旧规）、已回过的帖去重
-      // 10-20 深夜追加（拍板"没有图片/视频才回复帖子"，全局三账号）：带媒体帖淘汰（看不到图/视频，回复必违和）
-      const SKIP_MEDIA = (CFG.limits || {}).skipMediaReplies !== false;
-      const rej = { 自家号: 0, 锁定帖: 0, 已回过帖: 0, 带媒体帖: 0 };
-      const fresh = posts.filter((p) => {
-        if (!p.author) return false;
-        if (OWN.has(p.author)) { rej.自家号++; return false; }
-        if (p.locked) { rej.锁定帖++; return false; }
-        if (SKIP_MEDIA && p.hasMedia) { rej.带媒体帖++; return false; }
-        if (ts.repliedPosts[p.id]) { rej.已回过帖++; return false; }
-        return true;
-      });
-      const rejLine = Object.entries(rej).filter(([, v]) => v > 0).map(([k, v]) => k + '×' + v).join('、') || '无';
-      console.log(`话题 #${tag} 扫描 ${posts.length} 条 → 新增候选 ${fresh.length} 条（本轮配额 ${cap}；淘汰：${rejLine}）`);
-      if (DIAG) { DIAG_TOTAL.scanned += posts.length; DIAG_TOTAL.cands += fresh.length; for (const [k, v] of Object.entries(rej)) DIAG_TOTAL.rej[k] = (DIAG_TOTAL.rej[k] || 0) + v; }
-      cands = cands.concat(fresh); // 跨话题累计，凑满配额
-      } // end 话题循环
-      if (DIAG) { console.log('[诊断汇总] 扫描 ' + DIAG_TOTAL.scanned + ' 条 → 合格候选 ' + DIAG_TOTAL.cands + '；死因合计：' + (Object.entries(DIAG_TOTAL.rej).filter(([, v]) => v > 0).map(([k, v]) => k + '×' + v).join('、') || '无')); return []; } // 诊断模式：只扫描统计，不入队不生成不消耗 LLM
-      cands = cands.sort(() => Math.random() - 0.5).slice(0, cap + 3); // 多备 3 个给质量门淘汰
-    } finally { try { await page.close(); } catch { } await browser.disconnect(); } // 10-18 修复：先关页面再断开（漏关页面会随 BitBrowser 会话恢复累积）
-  } finally { await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { }); }
+    const XM = JSON.parse(fs.readFileSync(path.join(ROOT, 'x-mutual.json'), 'utf8'));
+    const r = await fetch(`${XM.base}/v1/posts?hours=48&limit=${Math.max(50, cap * 3)}&exclude_rt=1`, { headers: { Authorization: 'Bearer ' + XM.key }, signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const d = await r.json();
+    const posts = (d.posts || []).filter((p) => p && p.text && p.author && p.author.username && !p.is_retweet);
+    const rej = { 自家号: 0, 已回过帖: 0 };
+    cands = posts.filter((p) => {
+      if (OWN.has(p.author.username)) { rej.自家号++; return false; }
+      if (ts.repliedPosts[p.id]) { rej.已回过帖++; return false; }
+      return true;
+    }).sort((a, b) => (((b.metrics || {}).like_count || 0) + ((b.metrics || {}).reply_count || 0)) - (((a.metrics || {}).like_count || 0) + ((a.metrics || {}).reply_count || 0)))
+      .map((p) => ({ id: p.id, link: (p.url || '').replace('https://x.com', ''), text: String(p.text).replace(/\s+/g, ' ').trim().slice(0, 280), time: p.created_at, author: p.author.username, locked: false }));
+    const rejLine = Object.entries(rej).filter(([, v]) => v > 0).map(([k, v]) => k + '×' + v).join('、') || '无';
+    console.log(`话题候选=云端池 ${posts.length} 条 → 合格 ${cands.length} 条（48h，按互动热度；淘汰：${rejLine}）`);
+    if (DIAG) { console.log('[诊断汇总] 云端池 ' + posts.length + ' → 合格 ' + cands.length + '；死因：' + rejLine); return []; }
+    cands = cands.slice(0, cap + 3);
+  } catch (e) {
+    console.log('云端池失败/不可用（' + String(e.message).slice(0, 60) + '），本轮互关跳过');
+    try { fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: new Date().toISOString(), task: 'planner', account: ACCOUNT, window: WINDOW, action: 'poolFail', note: String(e.message).slice(0, 80) }) + '\n'); } catch { }
+    return [];
+  }
+  if (!cands.length) { console.log('云端池无合格候选，本轮互关跳过'); return []; }
   const baseId = loadQueue(WINDOW).length; // 补跑时 ID 续编，避免重复
   const queuedHandles = new Set();
   for (const w of WINS) for (const e of loadQueue(w)) if (e.status !== 'skipped' && e.targetHandle) queuedHandles.add(e.targetHandle);
