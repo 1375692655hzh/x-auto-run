@@ -278,22 +278,28 @@ if (WATCHDOG) {
   // ── 页1：光速回复轮询（通知页） ──
   async function pollNotifications() {
     try {
-      await pageReply.goto('https://x.com/notifications', { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await pageReply.waitForSelector('[data-testid="notification"]', { timeout: 20000 }).catch(() => { });
+      await pageReply.goto('https://x.com/notifications/mentions', { waitUntil: 'domcontentloaded', timeout: 60000 }); // 提及页=只含回复/提及（10-20 用户截图指路：全部页被关注/点赞洪流淹没，回复类沉底）
+      // 抓取加固：提及页的通知是 article 帖子元素（实测：无 notification testid，正文=对方回复帖本体）
+      let got = await pageReply.waitForSelector('article[data-testid="tweet"]', { timeout: 15000 }).then(() => true).catch(() => false);
+      if (!got) { await pageReply.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { }); got = await pageReply.waitForSelector('article[data-testid="tweet"]', { timeout: 15000 }).then(() => true).catch(() => false); }
       await sleep(2500);
+      for (let i = 0; i < 3; i++) { await pageReply.evaluate(() => window.scrollBy({ top: 700 + Math.floor(Math.random() * 300), behavior: 'smooth' })).catch(() => { }); await sleep(1200); }
       const items = await pageReply.evaluate(() => {
-        return [...document.querySelectorAll('[data-testid="notification"]')].slice(0, 25).map((n) => {
+        return [...document.querySelectorAll('article[data-testid="tweet"]')].slice(0, 25).map((n) => {
           const link = n.querySelector('a[href*="/status/"]');
-          const nameEl = n.querySelector('a[href^="/"]:not([href*="/status/"])');
-          const txt = (n.textContent || '').replace(/\s+/g, ' ').trim();
-          return { href: link ? link.getAttribute('href') : null, author: nameEl ? (nameEl.getAttribute('href') || '').replace('/', '').split('/')[0] : null, txt: txt.slice(0, 200) };
+          const nameEl = n.querySelector('[data-testid="User-Name"] a[href^="/"]');
+          const textEl = n.querySelector('[data-testid="tweetText"]');
+          return { href: link ? link.getAttribute('href') : null, author: nameEl ? (nameEl.getAttribute('href') || '').replace('/', '').split('/')[0] : null, txt: (textEl ? (textEl.textContent || '') : '').replace(/\s+/g, ' ').trim().slice(0, 200) };
         });
       }).catch(() => []);
-      let queued = 0;
+      let queued = 0, replyish = 0;
       for (const it of items) {
         if (!it.href || !it.author) continue;
-        const isReplyMention = /回复|回覆|reply|返信|提到|mention|提及|メンション/i.test(it.txt); // 返信/メンション=日文界面（fullwin ui=ja）——10-20 事故：日文通知全被漏判致光速回复 0 产出
+        // 分类=关键词正则 ∪ 结构判定（语言无关：回复/提及的链接指向【别人】的帖；赞/关注指向我们的帖或无帖链接——10-20 用户截图实证通知页为中文，且此前抓取层静默为零，结构判定兜底防再瞎）
+        const isReplyMention = /回复|回覆|reply|返信|提到|mention|提及|メンション/i.test(it.txt)
+          || !it.href.toLowerCase().includes('/' + ACCT.handle.toLowerCase() + '/');
         if (!isReplyMention) continue;
+        replyish++;
         if (OWN.has(it.author.toLowerCase())) continue; // 自家矩阵号不自动回（用户手动管，防互吹自动化）
         const key = it.href + '|' + it.author.toLowerCase();
         if (st.seenNotifs[key]) continue;
@@ -309,7 +315,9 @@ if (WATCHDOG) {
           queued++;
         } else audit({ action: 'replyGen', note: `@${it.author} 生成未过门(${qc ? qc.reason : 'LLM失败'})` });
       }
-      if (queued) LOG(`页1：${queued} 条新回复入延迟队列（1-10min 随机发出）`);
+      // 观测日志（10-20：全天 0 产出却零日志的教训）——每轮都记录看到什么
+      LOG(`页1：通知 ${items.length} 条 / 回复类 ${replyish} / 新入队 ${queued}`);
+      if (items.length && !queued) audit({ action: 'inboxPoll', note: `通知${items.length}/回复类${replyish}/入队0`, sample: items.slice(0, 2).map((i) => (i.txt || '').slice(0, 40)).join(' || ') });
     } catch (e) { LOG('页1 轮询异常: ' + String(e.message).slice(0, 60)); }
   }
 
