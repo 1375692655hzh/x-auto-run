@@ -442,8 +442,8 @@ if (WATCHDOG) {
       if (interactOk() && Date.now() >= nextReplyPoll) { nextReplyPoll = Date.now() + RC.replyPollMin * 60000; await pollNotifications(); if (aborted) break; }
       if (interactOk() && Date.now() >= nextPatrol) { nextPatrol = Date.now() + rand(RC.patrolGapMin[0], RC.patrolGapMin[1]) * 60000; await patrol(); if (aborted) break; }
       if (!topicOff && interactOk() && Date.now() >= nextPost) { nextPost = Date.now() + rand(RC.postGapMin[0], RC.postGapMin[1]) * 60000; await postHourly(); if (aborted) break; }
-      // 云帖改每小时跟随（10-20 拍板，上游每小时:40 出文）：每小时的 :50 拉取，当小时额度=白天2/夜里1
-      if (!DRY && now.getMinutes() >= (RC.cloudPullMinute != null ? RC.cloudPullMinute : 50) && st.lastCloudHour !== hourKey) {
+      // 云帖已调度化（cloud-posts.js 每小时 :50 独立调度，10-20）：常驻不再管云帖，防双发
+      if (!RC.cloudScheduler && !DRY && now.getMinutes() >= (RC.cloudPullMinute != null ? RC.cloudPullMinute : 50) && st.lastCloudHour !== hourKey) {
         st.lastCloudHour = hourKey; saveSt(st); await cloudSlot(hourKey); if (aborted) break;
       }
       if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { LOG('PAUSE 出现，退出'); break; }
