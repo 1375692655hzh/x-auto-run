@@ -31,7 +31,6 @@ const WL = { am: '早', mid: '午', pm: '下', eve: '晚', p1: '早', p2: '午',
 const Q = ((CFG.rounds || {}).quotas) || {};
 const QB = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).butcher) || Q; // butcher 实际配额（10-19 三运营窗 9+8+8 / 7+7+6）
 const QW = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).wcixot) || Q; // wcixot 实际配额
-const QM = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).maccostin) || Q; // maccostin 实际配额（10-19 接入：互关=butcher 减半）
 const QF = Object.assign({}, Q, (((CFG.rounds || {}).quotasByAccount) || {}).fullwin) || Q; // fullwin 实际配额（10-20 接入：仅发布，无互关无串门）
 function windowRows(w, t, QX, who) { // 互关窗行（10-19 起四窗 8:30/13/16/20 仅 wcixot 在跑）
   const f = (m) => (((m || {})[w] != null) ? m[w] : null);
@@ -75,9 +74,6 @@ const TASK_ROWS = [
   ...opsRows('p1', '09:35', 'wcixot', QW),
   ...opsRows('p2', '12:35', 'wcixot', QW),
   ...opsRows('p3', '19:35', 'wcixot', QW),
-  ...opsRows('p1', '09:35', 'maccostin', QM, { visit: false, maintain: false }),
-  ...opsRows('p2', '12:35', 'maccostin', QM, { visit: false, maintain: false }),
-  ...opsRows('p3', '19:35', 'maccostin', QM, { visit: false, maintain: false }),
   { id: 'residentFullwin', t: '08:00-23:00 常驻', cat: '主动互动', name: 'fullwin 常驻运营（一窗三页）', unit: '次', status: 'on', set: '页1 光速回复（5min轮询·延迟1-10min）· 页2 #蓝V互关巡逻（8-15min/轮·≤4条·无日帽）· 页3 互关帖（1h±0-25min·六tag）· 云端内容照常（09:35/12:35/19:35 并入）', setNum: null, sug: '帖帽35/回复帽60/关注帽100；LLM=mimo；熔断/PAUSE/看门狗全接', desc: '10-20 拍板常驻形态：替代 fullwin 三个运营窗；看门狗每小时查心跳自动重拉；自家矩阵号通知不自动回（用户手动管）' },
   { id: 'maintain', t: '12:35/19:35 窗内', cat: '主动互动', name: '权重维护互动（统一固定窗）', unit: '次', status: 'on', set: '≤1 帖/目标/窗 · ≤3 次/号/天（v1.1 拍板）', setNum: null, sug: '维护计入当日点赞/回复总帽', desc: '10-20 终版：四号互维护（每号维护自身以外四号含 owen）；概率管量=点赞0.8/回复1/3独立掷骰；保险丝=3N（N=维护者数）；同帖全圈≤2号；前置停留+40%顺访主页（11x+4x不可见信号）；掷骰与质量门失败均降级不重掷' },
   { id: 'verifyReply', t: '已下线', cat: '系统运维', name: '回复可见性抽查（已下线）', unit: '次', status: 'off', set: '—', setNum: null, sug: '—', desc: '10-19 拍板下线：走 FxTwitter 路径不稳定易误判，回复可见性以雷达四维（ghost/deboost 两维即回复可见性检测）为准，每晚 03:20 半夜数据窗' },
