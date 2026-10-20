@@ -55,7 +55,7 @@ async function fetchOwnPosts(handle) {
     const h = handle.toLowerCase();
     return (j.results || [])
       .filter((s) => ((s.author && s.author.screen_name) || '').toLowerCase() === h && !s.reposted_by && !s.replying_to && !s.possibly_sensitive)
-      .map((s) => ({ statusId: String(s.id), text: (s.text || '').slice(0, 600), postAt: (s.created_timestamp || 0) * 1000, likes: s.likes ?? null, replies: s.replies ?? null }));
+      .map((s) => ({ statusId: String(s.id), text: (s.text || '').slice(0, 600), postAt: (s.created_timestamp || 0) * 1000, likes: s.likes ?? null, replies: s.replies ?? null, hasMedia: !!(((s.media || {}).photos || []).length + ((s.media || {}).videos || []).length + ((s.media || {}).all || []).length) }));
   } catch { return null; }
 }
 
@@ -116,13 +116,16 @@ async function fetchOwnPosts(handle) {
     const base = { kind: 'maintain', fixed: true, statusId: p.statusId, postUrl: `https://x.com/${tAcct.handle}/status/${p.statusId}`, targetHandle: tAcct.handle, postAt: p.postAt, createdAt: nowIso(), status: 'planned', window: WINDOW };
     const rollLike = Math.random() < (M.likeProbability != null ? M.likeProbability : 0.8);
     const rollReply = (mCfg.actions || []).includes('reply') && Math.random() < (M.replyProbability != null ? M.replyProbability : 0.3333);
+    // 10-20 用户拍板"没有图片才回复帖子"：回复骰中但帖带图/视频 → 降级不回复不重掷（点赞照常；看不到图的回复必违和）
+    const skipMediaReply = rollReply && (CFG.limits || {}).skipMediaReplies !== false && p.hasMedia;
     let did = [];
     if (rollLike) {
       entries.push({ id: nextId(entries.length + 1), account: ACCOUNT, type: 'like', ...base });
       appendMLed({ account: ACCOUNT, action: 'like', statusId: p.statusId, targetHandle: tAcct.handle, window: WINDOW });
       did.push('点赞');
     }
-    if (rollReply) {
+    if (skipMediaReply) notes.push(`帖${p.statusId.slice(-6)} 带图帖不回复（10-20 拍板），降级处理不重掷`);
+    else if (rollReply) {
       const persona = (CFG.personas || {})[ACCOUNT];
       const brief = ((CFG.prompts || {}).visit || '') + '\n这是权重维护场景：对被维护账号的新帖做一条真诚、有信息量的回应。';
       const r = await generateReply({ post: p.text, author: tAcct.handle, persona, brief }).catch(() => null);

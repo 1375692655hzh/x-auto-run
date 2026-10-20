@@ -73,6 +73,9 @@ const dailyQuota = (kind) => WINS.reduce((s, w) => s + ((RQ[kind] || {})[w] || 0
 const windowQuota = (kind) => (RQ[kind] || {})[WINDOW] || 0;
 
 // ── FxTwitter：取对象最新一条自发非回复帖（≤72h） ──
+// 10-20 用户拍板"没有图片才回复帖子"：带图/视频帖跳过（我们看不到图，回复必违和），
+// 沿时间线往下找最近一条无媒体帖；72h 内全是带图帖 → 返回 null 本窗不串（不凑数）
+const hasMedia = (s) => { const m = s.media || {}; return ((m.photos || []).length + (m.videos || []).length + (m.all || []).length) > 0; };
 async function fetchLatestPost(handle) {
   const since = Math.floor(Date.now() / 1000 - 72 * 3600);
   try {
@@ -82,7 +85,8 @@ async function fetchLatestPost(handle) {
     const h = handle.toLowerCase();
     const own = (j.results || []).filter((s) => ((s.author && s.author.screen_name) || '').toLowerCase() === h && !s.reposted_by && !s.replying_to && !s.possibly_sensitive);
     own.sort((a, b) => (b.created_timestamp || 0) - (a.created_timestamp || 0));
-    const p = own[0];
+    const SKIP_MEDIA = (CFG.limits || {}).skipMediaReplies !== false;
+    const p = SKIP_MEDIA ? own.find((s) => !hasMedia(s)) : own[0];
     if (!p) return null;
     return { statusId: String(p.id), postUrl: `https://x.com/${handle}/status/${p.id}`, text: (p.text || '').slice(0, 600), at: p.created_at };
   } catch { return null; }
@@ -187,6 +191,7 @@ async function collectPosts(page, limit) {
         time: time ? time.getAttribute('datetime') : null,
         text: text ? clean(text.textContent).slice(0, 300) : '',
         author: nameEl ? nameEl.getAttribute('href').replace(/^\//, '').toLowerCase() : null,
+        hasPhoto: !!art.querySelector('[data-testid="tweetPhoto"]'), // 10-20 拍板"没有图片才回复帖子"：带图帖在互关过滤层淘汰
         locked: [...art.querySelectorAll('button, [role="button"]')].some((b) => /subscribe to unlock|订阅.{0,2}解锁|ロック解除/i.test((b.textContent || '').trim())),
       };
     }).filter((p) => p.id && p.link);
@@ -226,12 +231,15 @@ async function planCommunity(ts) {
       for (let i = 0; i < 4; i++) { await humanScroll(page, rand(700, 1100)); await sleep(rand(600, 1200)); }
       const posts = await collectPosts(page, R.scanPosts || 30);
       // 10-20 用户拍板"按建议执行"拆除：关键词过滤/作者14天冷却/帖龄3天上限/同批同作者单条——
-      // 互关要求=话题页的帖就回；保留的硬正确仅有：自家号排除、订阅帖（用户旧规）、已回过的帖去重
-      const rej = { 自家号: 0, 锁定帖: 0, 已回过帖: 0 };
+      // 互关要求=话题页的帖就回；保留的硬正确：自家号排除、订阅帖（用户旧规）、已回过的帖去重
+      // 10-20 深夜追加（拍板"没有图片才回复帖子"）：带图帖淘汰（看不到图，回复必违和）
+      const SKIP_MEDIA = (CFG.limits || {}).skipMediaReplies !== false;
+      const rej = { 自家号: 0, 锁定帖: 0, 已回过帖: 0, 带图帖: 0 };
       const fresh = posts.filter((p) => {
         if (!p.author) return false;
         if (OWN.has(p.author)) { rej.自家号++; return false; }
         if (p.locked) { rej.锁定帖++; return false; }
+        if (SKIP_MEDIA && p.hasPhoto) { rej.带图帖++; return false; }
         if (ts.repliedPosts[p.id]) { rej.已回过帖++; return false; }
         return true;
       });
