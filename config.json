@@ -529,8 +529,8 @@
       "endHour": 23,
       "replyPollMin": 5,
       "replyDelayMin": [
-        1,
-        10
+        0.5,
+        3
       ],
       "patrolTopic": "蓝V互关",
       "patrolGapMin": [
@@ -563,7 +563,11 @@
       "postCapDay": 35,
       "replyCapDay": 60,
       "followCapDay": 100,
-      "note": "10-20 拍板常驻形态：一窗三页（光速回复5min轮询延迟1-10min/#蓝V互关巡逻8-15min每轮≤4无日帽/互关帖1h±0-25min）；云端内容照常并入；LLM 锁 mimo；自家矩阵号的通知不自动回（用户手动）"
+      "note": "10-20 拍板常驻形态：一窗三页（光速回复5min轮询延迟1-10min/#蓝V互关巡逻8-15min每轮≤4无日帽/互关帖1h±0-25min）；云端内容照常并入；LLM 锁 mimo；自家矩阵号的通知不自动回（用户手动）；10-20 拍板：同作者每轮≤1条（跨轮不限）；回复延迟 0.5-3min；巡逻帖间隔 25-60s（速度优先）",
+      "patrolPostGapSec": [
+        25,
+        60
+      ]
     }
   }
 }

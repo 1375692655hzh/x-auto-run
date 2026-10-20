@@ -314,7 +314,9 @@ if (WATCHDOG) {
       const fresh = posts.filter((p) => !st.seenPosts[p.id] && !OWN.has((p.author || '').toLowerCase()) && !p.locked);
       for (const p of posts) st.seenPosts[p.id] = nowIso();
       st.material = posts.map((p) => ({ id: p.id, author: p.author, text: p.text, time: p.time })).slice(0, 12); // 页3 素材（近 1h 参考用）
-      const take = fresh.slice(0, RC.patrolPerRound);
+      // 同作者每轮只取一条（10-20 拍板方案二）：先按作者去重再取每轮上限，活跃作者（顶帖党）一轮最多吃一条
+      const seenAuth = new Set();
+      const take = fresh.filter((p) => { const a = (p.author || '').toLowerCase(); if (seenAuth.has(a)) return false; seenAuth.add(a); return true; }).slice(0, RC.patrolPerRound);
       LOG(`页2：#${RC.patrolTopic} 本轮新帖 ${fresh.length} 条，取 ${take.length} 条评论`);
       for (const p of take) {
         if (aborted || usedToday('reply') >= RC.replyCapDay) break;
@@ -332,7 +334,7 @@ if (WATCHDOG) {
           if (fo.ok) { ledgerRecord('follow'); audit({ action: 'follow', target: p.author, note: '巡逻回复后关注' }); }
           else audit({ action: 'follow', target: p.author, status: 'failed', note: fo.note });
         }
-        await sleep(rand(60, 180) * 1000); // 帖间隔
+        const g = RC.patrolPostGapSec || [25, 60]; await sleep(rand(g[0], g[1]) * 1000); // 帖间隔（10-20 拍板提速：60-180→25-60s）
       }
     } catch (e) { LOG('页2 巡逻异常: ' + String(e.message).slice(0, 60)); }
   }
