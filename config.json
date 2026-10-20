@@ -376,7 +376,8 @@
     ],
     "scanPosts": 20,
     "topicsPerScan": 3,
-    "topicsPerScanNote": "10-20 修复：每窗扫 3 个话题凑配额（原一轮一话题，wcixot p1 轮到干涸话题致 0/14 事故）"
+    "topicsPerScanNote": "10-20 修复：每窗扫 3 个话题凑配额（原一轮一话题，wcixot p1 轮到干涸话题致 0/14 事故）",
+    "filterNote": "10-20 用户拍板拆除：关键词过滤/作者14天冷却/帖龄3天/同批同作者单条（互关要求=话题页的帖就回）；仅保留：自家号排除、订阅帖（用户旧规）、已回过帖去重；topicsPerScan=3；另澄清：历史文档所述关注画像筛（粉≥30等）代码中从未实现"
   },
   "pacing": {
     "actionDelayGaussMs": [

@@ -214,17 +214,14 @@ async function planCommunity(ts) {
       await sleep(3000);
       for (let i = 0; i < 4; i++) { await humanScroll(page, rand(700, 1100)); await sleep(rand(600, 1200)); }
       const posts = await collectPosts(page, R.scanPosts || 30);
-      const kws = (CFG.task2.keywords || []).map((k) => k.toLowerCase());
-      const cutoff = Date.now() - 3 * 86400000;
-      // 死因留痕（10-20：wcixot p1 互关 0/14，用户定性"严重不符合设计要求"——7 条怎么被筛掉的外部不可见）
-      const rej = { 关键词不符: 0, 自家号: 0, 锁定帖: 0, 帖龄超3天: 0, 已回过帖: 0, 作者冷却中: 0 };
+      // 10-20 用户拍板"按建议执行"拆除：关键词过滤/作者14天冷却/帖龄3天上限/同批同作者单条——
+      // 互关要求=话题页的帖就回；保留的硬正确仅有：自家号排除、订阅帖（用户旧规）、已回过的帖去重
+      const rej = { 自家号: 0, 锁定帖: 0, 已回过帖: 0 };
       const fresh = posts.filter((p) => {
-        const t = (p.text || '').toLowerCase();
-        if (!kws.some((k) => t.includes(k))) { rej.关键词不符++; return false; }
-        if (!p.author || OWN.has(p.author) || p.locked) { if (!p.author) return false; OWN.has(p.author) ? rej.自家号++ : rej.锁定帖++; return false; }
-        if (!p.time || Date.parse(p.time) < cutoff) { rej.帖龄超3天++; return false; }
+        if (!p.author) return false;
+        if (OWN.has(p.author)) { rej.自家号++; return false; }
+        if (p.locked) { rej.锁定帖++; return false; }
         if (ts.repliedPosts[p.id]) { rej.已回过帖++; return false; }
-        if (ts.repliedAuthors[p.author] && dayDiff(ts.repliedAuthors[p.author], today()) < L.communityAuthorCooldownDays) { rej.作者冷却中++; return false; }
         return true;
       });
       const rejLine = Object.entries(rej).filter(([, v]) => v > 0).map(([k, v]) => k + '×' + v).join('、') || '无';
@@ -233,9 +230,6 @@ async function planCommunity(ts) {
       cands = cands.concat(fresh); // 跨话题累计，凑满配额
       } // end 话题循环
       if (DIAG) { console.log('[诊断汇总] 扫描 ' + DIAG_TOTAL.scanned + ' 条 → 合格候选 ' + DIAG_TOTAL.cands + '；死因合计：' + (Object.entries(DIAG_TOTAL.rej).filter(([, v]) => v > 0).map(([k, v]) => k + '×' + v).join('、') || '无')); return []; } // 诊断模式：只扫描统计，不入队不生成不消耗 LLM
-      // 同作者只取一条（跨话题）+ 打乱（挑选感）
-      const seen = new Set();
-      cands = cands.filter((p) => { if (seen.has(p.author)) return false; seen.add(p.author); return true; });
       cands = cands.sort(() => Math.random() - 0.5).slice(0, cap + 3); // 多备 3 个给质量门淘汰
     } finally { try { await page.close(); } catch { } await browser.disconnect(); } // 10-18 修复：先关页面再断开（漏关页面会随 BitBrowser 会话恢复累积）
   } finally { await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { }); }
