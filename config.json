@@ -240,7 +240,7 @@
       90000,
       30000
     ],
-    "sessionMaxMinutes": 25,
+    "sessionMaxMinutes": 40,
     "lockStaleMinutes": 30
   },
   "personas": {

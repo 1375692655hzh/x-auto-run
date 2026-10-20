@@ -506,6 +506,13 @@ function executeAction(page, entry) {
         await gsleep(X.followFirstGapGaussMs);
       }
       r = await executeAction(page, e).catch((err) => ({ ok: false, note: err.message }));
+      // 瞬态错误（协议超时/网络抖动，10-20 P2 实战：wcixot 3 连瞬态误触熔断整窗陪葬）：重试一次，仍败不计连败
+      const TRANSIENT = /Protocol error|timed out|TimeoutError|net::|ERR_/i.test((r && r.note) || '');
+      if (!r.ok && TRANSIENT) {
+        await sleep(8000);
+        r = await executeAction(page, e).catch((err) => ({ ok: false, note: err.message + '（重试后仍瞬态）' }));
+        if (r.ok) r.note = '瞬态重试成功';
+      }
 
       if (r.ok) { e.status = 'done'; e.result = SIMULATE ? 'simulated' : 'ok'; done += 1; stats.executed.push(e.id); if (e.type === 'reply') { syncContacts(e, 'reply'); recordReply(e); } if (e.type === 'follow') syncContacts(e, 'follow'); }
       else if (r.unknown) { e.status = 'unknown'; e.result = '结果不明（占额度，禁重试，待核）: ' + (r.note || ''); stats.unknown.push(e.id); }
@@ -518,7 +525,9 @@ function executeAction(page, entry) {
         e.status = 'skipped'; e.result = '目标帖不可见（维护跳过）: ' + (r.note || ''); stats.skipped.push(e.id);
       }
       else {
-        e.status = 'failed'; e.result = r.note || '失败'; fails += 1; stats.failed.push(e.id);
+        e.status = 'failed'; e.result = r.note || '失败'; stats.failed.push(e.id);
+        if (TRANSIENT) { /* 瞬态错误不投熔断票（10-20 拍板）：连败熔断只数真失败 */ }
+        else fails += 1;
         if (fails >= (L.consecutiveFailAbort || 3)) { sessionAborted = true; }
       }
       saveQueue(queue);

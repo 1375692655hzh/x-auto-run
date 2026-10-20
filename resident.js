@@ -189,6 +189,22 @@ async function collectPosts(page, limit = 30) {
   }, limit).catch(() => []);
 }
 
+// ── 动作隔离与瞬态重试（10-20：巡逻 8/8 轮协议挂起的修复） ──
+async function withTempPage(fn) {
+  const pg = await browser.newPage();
+  await pg.setViewport({ width: 1400 + randi(0, 80), height: 900 });
+  try { return await fn(pg); } finally { try { await pg.close(); } catch { } }
+}
+async function retryTransient(fn) {
+  let r = await fn().catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 60) }));
+  if (!r.ok && /Protocol error|timed out|TimeoutError|net::|ERR_/i.test(r.note || '')) {
+    LOG('瞬态错误，5s 后重试一次: ' + String(r.note).slice(0, 40));
+    await sleep(5000);
+    r = await fn().catch((e) => ({ ok: false, note: 'EXC重试:' + String(e.message).slice(0, 60) }));
+  }
+  return r;
+}
+
 // ── 看门狗模式 ──
 if (WATCHDOG) {
   (async () => {
@@ -217,7 +233,7 @@ if (WATCHDOG) {
   LOG(`常驻启动：@${ACCT.handle}，三页面（回复/巡逻/发布），LLM=${RC.llmChannel}，帖帽${RC.postCapDay} 回复帽${RC.replyCapDay}`);
   const j = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).then((r) => r.json());
   if (!j.success) { console.error('开窗失败:', JSON.stringify(j).slice(0, 100)); process.exit(1); }
-  const browser = await puppeteer.connect({ browserWSEndpoint: j.data.ws, defaultViewport: null, protocolTimeout: 300000 });
+  const browser = await puppeteer.connect({ browserWSEndpoint: j.data.ws, defaultViewport: null, protocolTimeout: 90000 });
   try { const ps0 = await browser.pages(); for (let i = 1; i < ps0.length; i++) { try { await ps0[i].close(); } catch { } } } catch { } // 清理上次异常退出留下的孤儿页
   const pageReply = await browser.newPage(); await pageReply.setViewport({ width: 1400 + randi(0, 120), height: 900 });
   const pageTopic = await browser.newPage(); await pageTopic.setViewport({ width: 1400 + randi(0, 120), height: 900 });
@@ -302,19 +318,20 @@ if (WATCHDOG) {
       LOG(`页2：#${RC.patrolTopic} 本轮新帖 ${fresh.length} 条，取 ${take.length} 条评论`);
       for (const p of take) {
         if (aborted || usedToday('reply') >= RC.replyCapDay) break;
-        const followOk = DRY ? { ok: false, note: 'dry跳过关注' } : (usedToday('follow') < RC.followCapDay ? await followOnPage(pageTopic, p.author) : { ok: false, note: '关注帽满' });
-        if (followOk.ok) { ledgerRecord('follow'); audit({ action: 'follow', target: p.author, note: '巡逻先关注' }); }
-        const brief = followOk.ok
-          ? '这是互关话题帖，你刚刚关注了楼主；真诚回应他帖子的具体内容，自然表达互相关注、常来往。'
-          : '这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注、常来往（不要声称已关注）。';
-        const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: [], channel: RC.llmChannel }).catch(() => null);
+        const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注、常来往（不要声称已关注）。', history: [], channel: RC.llmChannel }).catch(() => null);
         const qc = r && r.text ? quality.check(r.text, {}) : null;
         if (!(qc && qc.ok)) { audit({ action: 'patrolGen', target: p.author, note: `生成未过门(${qc ? qc.reason : 'LLM失败'})，跳过` }); continue; }
         if (DRY) { LOG(`[DRY] 应评论 @${p.author}: ${qc.cleaned.slice(0, 30)}…`); continue; }
-        const rr = await replyOnPage(pageTopic, p.id, 'https://x.com' + (p.link || `/i/web/status/${p.id}`), qc.cleaned);
+        // 动作隔离（10-20 用户建议）：每个动作独立临时页+用完即关，与搜索页状态彻底解耦；瞬态错误重试一次
+        const postUrl = 'https://x.com' + (p.link || ('/i/web/status/' + p.id));
+        let rr = await withTempPage((pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned)));
         if (rr.ok || rr.unknown) { ledgerRecord('reply'); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
         else audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: 'failed', note: rr.note });
-        if (await checkAbort(pageTopic, '巡逻')) break;
+        if (rr.ok && usedToday('follow') < RC.followCapDay) {
+          const fo = await withTempPage((pg) => retryTransient(() => followOnPage(pg, p.author)));
+          if (fo.ok) { ledgerRecord('follow'); audit({ action: 'follow', target: p.author, note: '巡逻回复后关注' }); }
+          else audit({ action: 'follow', target: p.author, status: 'failed', note: fo.note });
+        }
         await sleep(rand(60, 180) * 1000); // 帖间隔
       }
     } catch (e) { LOG('页2 巡逻异常: ' + String(e.message).slice(0, 60)); }
