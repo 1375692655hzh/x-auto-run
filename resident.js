@@ -345,13 +345,17 @@ if (WATCHDOG) {
       const r = await generateReply({
         post: mat || '（暂无话题素材）',
         persona: (CFG.personas || {})[ACCOUNT],
-        brief: `写一条互关帖：带上这些标签 ${RC.postTags.join(' ')}，一两句话表明认真做交易/看盘的人求互相关注、必回访；可参考但不得照抄话题里别人帖子的说法。40~100 字。`,
+        brief: `写一条互关帖正文：一两句话表明认真做交易/看盘的人求互相关注、必回访；可参考但不得照抄话题里别人帖子的说法；正文结尾用句号，不要写任何 # 标签（系统会自动附加固定标签组）。40~100 字。`,
         history: [], channel: RC.llmChannel,
       }).catch(() => null);
       const qc = r && r.text ? quality.check(r.text, {}) : null;
       if (!(qc && qc.ok)) { audit({ action: 'hourlyGen', note: `生成未过门(${qc ? qc.reason : 'LLM失败'})` }); return; }
-      if (DRY) { LOG(`[DRY] 应发互关帖: ${qc.cleaned.slice(0, 40)}…`); return; }
-      const rr = await postOnPage(pagePost, qc.cleaned);
+      if (DRY) { LOG(`[DRY] 应发互关帖: ${qc.cleaned.slice(0, 40)}… + 标签组`); return; }
+      // 标签强制程序化附加（10-20 事故：LLM 系统提示禁标签+质量门剥标签双重绞杀致互关帖裸发）——确定性拼接，不依赖 LLM/质量门
+      const postText = (qc.cleaned || '').trim().replace(/[#＃][^s＃#，。！？、]+/g, '').trim() + '
+
+' + RC.postTags.join(' ');
+      const rr = await postOnPage(pagePost, postText);
       if (rr.ok || rr.unknown) { ledgerRecord('post'); audit({ action: 'hourlyPost', status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 50), note: rr.note }); LOG('页3：互关帖已发'); }
       else audit({ action: 'hourlyPost', status: 'failed', note: rr.note });
       await checkAbort(pagePost, '互关帖');
