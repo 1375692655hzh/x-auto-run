@@ -288,7 +288,7 @@ if (WATCHDOG) {
       let queued = 0;
       for (const it of items) {
         if (!it.href || !it.author) continue;
-        const isReplyMention = /回复|回覆|reply|提到|mention|提及/i.test(it.txt);
+        const isReplyMention = /回复|回覆|reply|返信|提到|mention|提及|メンション/i.test(it.txt); // 返信/メンション=日文界面（fullwin ui=ja）——10-20 事故：日文通知全被漏判致光速回复 0 产出
         if (!isReplyMention) continue;
         if (OWN.has(it.author.toLowerCase())) continue; // 自家矩阵号不自动回（用户手动管，防互吹自动化）
         const key = it.href + '|' + it.author.toLowerCase();
