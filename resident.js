@@ -245,10 +245,15 @@ if (WATCHDOG) {
   if (st.day !== today()) { st.seenNotifs = {}; st.seenPosts = {}; st.lastCloudSlot = {}; st.day = today(); }
   let aborted = false;
   const sendQueue = []; // {kind, statusId, postUrl, author, text, sendAt}
+  // 10-20 拍板 24 小时制：进程全天在岗（至当日 23:59 自灭，00:05 由计划任务接替）；
+  // 互动（巡逻/光速回复/互关帖）仅 interactionHours[8,22] 内；云帖全天——白天每小时≤2、夜里(22~8)1条/小时
+  const IH = RC.interactionHours || [8, 22];
+  const interactOk = () => { const h = new Date().getHours(); return h >= IH[0] && h < IH[1]; };
+  const cloudQuota = () => interactOk() ? (RC.cloudDayHourMax != null ? RC.cloudDayHourMax : 2) : (RC.cloudNightHourMax != null ? RC.cloudNightHourMax : 1);
   let nextReplyPoll = Date.now() + 60 * 1000;
   let nextPatrol = Date.now() + rand(60, 180) * 1000;
   let nextPost = Date.now() + rand(3, 10) * 60000; // 启动后先热身，不立即发
-  const endAt = new Date(); endAt.setHours(RC.endHour, 0, 0, 0);
+  const endAt = new Date(); endAt.setHours(23, 59, 0, 0);
 
   async function checkAbort(page, where) {
     const t = await riskToast(page);
@@ -363,37 +368,44 @@ if (WATCHDOG) {
     } catch (e) { LOG('页3 发帖异常: ' + String(e.message).slice(0, 60)); }
   }
 
-  // ── 云端内容（照常：槽点拉取滴灌，并入发布队列） ──
-  async function cloudSlot(slot) {
+  // ── 云端内容（10-20 拍板每小时跟随：每小时 :50 拉，当小时额度=白天2/夜里1，余量写回文件留给下一小时） ──
+  async function cloudSlot(hourKey) {
     try {
       spawnSync(process.execPath, [path.join(ROOT, 'content-pull.js'), '--account=' + ACCOUNT], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, NODE_EXTRA_CA_CERTS: path.join(ROOT, 'x-daily-cert.pem') } });
+      const quota = cloudQuota();
+      let queued = 0;
       let delayMin = 1;
       for (const f of fs.existsSync(INBOX) ? fs.readdirSync(INBOX) : []) {
         if (!f.startsWith(`pull-${ACCOUNT}-`) || !f.endsWith('.json')) continue;
         const items = readJson(path.join(INBOX, f), []);
-        for (const it of items) {
-          if (usedToday('post') + sendQueue.filter((q) => q.kind === 'cloud').length >= RC.postCapDay) break;
+        const room = Math.max(0, Math.min(quota - queued, RC.postCapDay - usedToday('post') - sendQueue.filter((q) => q.kind === 'cloud').length));
+        for (const it of items.slice(0, room)) {
           sendQueue.push({ kind: 'cloud', text: it.text, sendAt: Date.now() + delayMin * 60000 });
-          delayMin += rand(RC.cloudGapMin[0], RC.cloudGapMin[1]);
+          queued++; delayMin += rand(RC.cloudGapMin[0], RC.cloudGapMin[1]);
         }
-        try { fs.renameSync(path.join(INBOX, f), path.join(INBOX, f + '.done-' + Date.now())); } catch { }
+        const rest = items.slice(room);
+        if (rest.length) writeJson(path.join(INBOX, f), rest); // 额度外的余量写回，下一小时继续消费
+        else { try { fs.renameSync(path.join(INBOX, f), path.join(INBOX, f + '.done-' + Date.now())); } catch { } }
+        if (queued >= quota) break;
       }
-      audit({ action: 'cloudSlot', slot, queued: sendQueue.filter((q) => q.kind === 'cloud').length });
-    } catch (e) { audit({ action: 'cloudSlot', slot, note: String(e.message).slice(0, 60) }); }
+      audit({ action: 'cloudSlot', slot: hourKey, quota, queued, rest: fs.existsSync(INBOX) ? (fs.readdirSync(INBOX).filter((f) => f.startsWith('pull-' + ACCOUNT + '-') && f.endsWith('.json')).length) : 0 });
+    } catch (e) { audit({ action: 'cloudSlot', slot: hourKey, note: String(e.message).slice(0, 60) }); }
   }
 
   // ── 主循环 ──
-  LOG(`主循环开始，${RC.endHour}:00 自灭；干跑=${DRY}`);
+  LOG(`主循环开始，23:59 自灭（00:05 计划任务接替）；互动窗 ${IH[0]}-${IH[1]} 点，云帖全天（白天≤${cloudQuota()}条/时）；干跑=${DRY}`);
   while (!aborted && Date.now() < endAt.getTime()) {
     st.heartbeatAt = nowIso(); saveSt(st);
     const now = new Date();
-    const hm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const hourKey = `${today()}-${now.getHours()}`;
     try {
-      if (Date.now() >= nextReplyPoll) { await pollNotifications(); nextReplyPoll = Date.now() + RC.replyPollMin * 60000; if (aborted) break; }
-      if (Date.now() >= nextPatrol) { await patrol(); nextPatrol = Date.now() + rand(RC.patrolGapMin[0], RC.patrolGapMin[1]) * 60000; if (aborted) break; }
-      if (Date.now() >= nextPost) { await postHourly(); nextPost = Date.now() + rand(RC.postGapMin[0], RC.postGapMin[1]) * 60000; if (aborted) break; }
-      for (const slot of RC.cloudSlots) {
-        if (!DRY && hm >= slot && !st.lastCloudSlot[slot]) { st.lastCloudSlot[slot] = nowIso(); saveSt(st); await cloudSlot(slot); if (aborted) break; }
+      // 互动三路守互动窗（夜里只发帖不互动）
+      if (interactOk() && Date.now() >= nextReplyPoll) { await pollNotifications(); nextReplyPoll = Date.now() + RC.replyPollMin * 60000; if (aborted) break; }
+      if (interactOk() && Date.now() >= nextPatrol) { await patrol(); nextPatrol = Date.now() + rand(RC.patrolGapMin[0], RC.patrolGapMin[1]) * 60000; if (aborted) break; }
+      if (interactOk() && Date.now() >= nextPost) { await postHourly(); nextPost = Date.now() + rand(RC.postGapMin[0], RC.postGapMin[1]) * 60000; if (aborted) break; }
+      // 云帖改每小时跟随（10-20 拍板，上游每小时:40 出文）：每小时的 :50 拉取，当小时额度=白天2/夜里1
+      if (!DRY && now.getMinutes() >= (RC.cloudPullMinute != null ? RC.cloudPullMinute : 50) && st.lastCloudHour !== hourKey) {
+        st.lastCloudHour = hourKey; saveSt(st); await cloudSlot(hourKey); if (aborted) break;
       }
       // 延迟发送队列（DRY 不执行任何真实发送）
       for (let i = sendQueue.length - 1; i >= 0 && !DRY; i--) {
