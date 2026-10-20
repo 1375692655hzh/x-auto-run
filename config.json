@@ -374,7 +374,9 @@
       "必回",
       "求关注"
     ],
-    "scanPosts": 20
+    "scanPosts": 20,
+    "topicsPerScan": 3,
+    "topicsPerScanNote": "10-20 修复：每窗扫 3 个话题凑配额（原一轮一话题，wcixot p1 轮到干涸话题致 0/14 事故）"
   },
   "pacing": {
     "actionDelayGaussMs": [

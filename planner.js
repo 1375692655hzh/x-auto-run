@@ -23,6 +23,8 @@ const argv = process.argv.slice(2);
 const argOf = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 ? argv[i + 1] : d; };
 const ACCOUNT = argOf('account', 'butcher');
 const WINDOW = argOf('window', 'am');
+const DIAG = argv.includes('--scan-diag'); // 诊断模式：只扫描+死因统计，不入队不生成（10-20 互关 0 条事故排查用）
+const DIAG_TOTAL = { scanned: 0, cands: 0, rej: {} };
 const MODE = argOf('mode', 'visit');
 const MODES = String(MODE).split(',').map((x) => x.trim()).filter(Boolean);
 const RQ = Object.assign({}, (CFG.rounds || {}).quotas || {}, ((CFG.rounds || {}).quotasByAccount || {})[ACCOUNT] || {}); // 每号配额=默认档打底+每号覆盖（10-18：wcixot 有独立数字，新增默认任务自动继承）
@@ -186,12 +188,14 @@ async function collectPosts(page, limit) {
 // ── 模式二：互关话题选帖（浏览器只读扫描） ──
 async function planCommunity(ts) {
   const cap = Math.min(windowQuota('community'), dailyQuota('community') - countedToday('community'));
-  if (cap <= 0) { console.log('互关额度已满'); return []; }
+  if (cap <= 0 && !DIAG) { console.log('互关额度已满'); return []; }
+  const scanCap = DIAG ? 99 : cap; // 诊断模式不受配额门（排查看的是供给，不是额度）
   const hour = new Date().getHours();
   if (hour < L.activeHours[0] || hour >= L.activeHours[1]) { console.log('不在执行窗，互关扫描跳过（守窗）'); return []; }
   const tags = CFG.task2.hashtags;
-  const tag = tags[ts.tagIndex % tags.length];
-  ts.tagIndex += 1; saveTaskstate(ts);
+  // 每窗多话题扫描凑配额（10-20 修复：原"一轮一话题"使整窗配额押在单话题瞬时状态上——
+  // wcixot p1 轮到干涸的 #浇朋友 7 条全筛 → 0/14 事故；K3 原设计本就是轮换多话题）
+  const topicsPerScan = Math.max(1, (CFG.task2 || {}).topicsPerScan || 3);
   const ws = await openWindow(ACCT.profileId);
   let cands = [];
   try {
@@ -201,6 +205,10 @@ async function planCommunity(ts) {
       await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
       await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
       if (!(await verifyLogin(page, ACCT.handle))) throw new Error('登录态校验失败');
+      for (let ti = 0; ti < topicsPerScan; ti++) {
+        if (!DIAG && cands.length >= cap + 3) break; // 凑够即止，不多扫
+        const tag = tags[ts.tagIndex % tags.length];
+        ts.tagIndex += 1; saveTaskstate(ts);
       await page.goto(`https://x.com/search?q=${encodeURIComponent('#' + tag)}&f=live`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForSelector('article[data-testid="tweet"]', { timeout: 45000 }).catch(() => { });
       await sleep(3000);
@@ -208,19 +216,27 @@ async function planCommunity(ts) {
       const posts = await collectPosts(page, R.scanPosts || 30);
       const kws = (CFG.task2.keywords || []).map((k) => k.toLowerCase());
       const cutoff = Date.now() - 3 * 86400000;
-      cands = posts.filter((p) => {
+      // 死因留痕（10-20：wcixot p1 互关 0/14，用户定性"严重不符合设计要求"——7 条怎么被筛掉的外部不可见）
+      const rej = { 关键词不符: 0, 自家号: 0, 锁定帖: 0, 帖龄超3天: 0, 已回过帖: 0, 作者冷却中: 0 };
+      const fresh = posts.filter((p) => {
         const t = (p.text || '').toLowerCase();
-        const authorCd = !ts.repliedAuthors[p.author] || dayDiff(ts.repliedAuthors[p.author], today()) >= L.communityAuthorCooldownDays;
-        return kws.some((k) => t.includes(k))
-          && p.author && !OWN.has(p.author) && !p.locked
-          && p.time && Date.parse(p.time) >= cutoff
-          && !ts.repliedPosts[p.id] && authorCd;
+        if (!kws.some((k) => t.includes(k))) { rej.关键词不符++; return false; }
+        if (!p.author || OWN.has(p.author) || p.locked) { if (!p.author) return false; OWN.has(p.author) ? rej.自家号++ : rej.锁定帖++; return false; }
+        if (!p.time || Date.parse(p.time) < cutoff) { rej.帖龄超3天++; return false; }
+        if (ts.repliedPosts[p.id]) { rej.已回过帖++; return false; }
+        if (ts.repliedAuthors[p.author] && dayDiff(ts.repliedAuthors[p.author], today()) < L.communityAuthorCooldownDays) { rej.作者冷却中++; return false; }
+        return true;
       });
-      // 同作者只取一条 + 打乱（挑选感）
+      const rejLine = Object.entries(rej).filter(([, v]) => v > 0).map(([k, v]) => k + '×' + v).join('、') || '无';
+      console.log(`话题 #${tag} 扫描 ${posts.length} 条 → 新增候选 ${fresh.length} 条（本轮配额 ${cap}；淘汰：${rejLine}）`);
+      if (DIAG) { DIAG_TOTAL.scanned += posts.length; DIAG_TOTAL.cands += fresh.length; for (const [k, v] of Object.entries(rej)) DIAG_TOTAL.rej[k] = (DIAG_TOTAL.rej[k] || 0) + v; }
+      cands = cands.concat(fresh); // 跨话题累计，凑满配额
+      } // end 话题循环
+      if (DIAG) { console.log('[诊断汇总] 扫描 ' + DIAG_TOTAL.scanned + ' 条 → 合格候选 ' + DIAG_TOTAL.cands + '；死因合计：' + (Object.entries(DIAG_TOTAL.rej).filter(([, v]) => v > 0).map(([k, v]) => k + '×' + v).join('、') || '无')); return []; } // 诊断模式：只扫描统计，不入队不生成不消耗 LLM
+      // 同作者只取一条（跨话题）+ 打乱（挑选感）
       const seen = new Set();
       cands = cands.filter((p) => { if (seen.has(p.author)) return false; seen.add(p.author); return true; });
       cands = cands.sort(() => Math.random() - 0.5).slice(0, cap + 3); // 多备 3 个给质量门淘汰
-      console.log(`话题 #${tag} 扫描 ${posts.length} 条 → 候选 ${cands.length} 条（本轮配额 ${cap}）`);
     } finally { try { await page.close(); } catch { } await browser.disconnect(); } // 10-18 修复：先关页面再断开（漏关页面会随 BitBrowser 会话恢复累积）
   } finally { await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { }); }
   const baseId = loadQueue(WINDOW).length; // 补跑时 ID 续编，避免重复
