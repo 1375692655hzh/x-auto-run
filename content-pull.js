@@ -2,9 +2,10 @@
 // 用法: node content-pull.js [--dry]（schtasks 09:50/13:10/19:10 各跑一次，云端 9/12/18 档后、三窗前）
 // 流程: 按 content-source.json bindings 逐号拉北京今天+昨天 → text_hash 去重（缺失用全文 sha256 回退）
 //       → 每号独立缓冲 state/content-buffer-<local>.json（48h 时效/上限30）
-//       → 滴灌条件：bound && publishAuth && publish && 账号 role=run && 非周末 && 投递箱无未消费 pull-<local>-*
-//       → 滴灌量 = min(该窗预算 windowAllocation[下一窗], 日预算−今日已入队, 缓冲)
-//       滴灌必须精确等于 planner 该窗会消费的量（planner 整文件消费即归档，超额=永不再发）
+//       → 滴灌条件：bound && publishAuth && publish && 账号 role=run && 非周末
+//       → 滴灌量（补足制，10-20 交付必达）= 窗配额定稿数 − 存量未消费文件里的新鲜文本数；
+//         存量文件全重复→归档 .done-dup 解锁；文本级去重=近2天已入队/已发队列文本（云端 text_hash 不稳的终极防线）
+//       窗配额定稿={min,max} 区间按"日期+窗+账号"种子掷确定数，与 planner 消费帽同源同数
 // 降级: 单日拉取失败跳过不写结论；key 失效(401/403)本轮全停投递并告警；周末不投递（缓冲照常更新/过期）
 const fs = require('fs');
 const path = require('path');
@@ -34,14 +35,29 @@ async function fetchJSON(url) {
 
 // 下一执行窗（滴灌目标）：am<10:20 / mid<15:20 / pm 其余
 function nextWindow() { const m = new Date(Date.now() + 8 * 3600000).getUTCHours() * 60 + new Date(Date.now() + 8 * 3600000).getUTCMinutes(); return m < 575 ? 'p1' : m < 755 ? 'p2' : m < 1175 ? 'p3' : 'p1'; } // 发布窗 09:35/12:35/19:35（分钟界 575/755/1175）
-// 今日已入队帖数（该号）：扫今日三窗队列里 type=post 且未跳过的条目
+// 今日已入队帖数（该号）：扫今日各窗队列里 type=post 且未跳过的条目（10-20 修复：窗名写死 am/mid/pm 永远数 0，日帽形同虚设 → 改读 config.rounds.windows 键）
 function enqueuedToday(local) {
   let n = 0;
-  for (const w of ['am', 'mid', 'pm']) {
+  for (const w of Object.keys((CFG.rounds || {}).windows || { p1: 1, p2: 1, p3: 1 })) {
     const q = readJson(path.join(ROOT, 'queue', `${bjDate(0)}-${w}-${local}.json`), []);
     if (Array.isArray(q)) n += q.filter((e) => e && e.type === 'post' && e.status !== 'skipped').length;
   }
   return n;
+}
+// 近2天该号已入队/已发帖文本集（10-20 交付必达：云端 text_hash 不稳时同一文案会重复入缓冲——
+// 10-20 11:26 重滴 butcher P1 三帖、P2 窗被重复文件堵死 0 发帖的事故根因；文本级去重与哈希无关，确定性防线）
+function postedTexts(local) {
+  const set = new Set();
+  for (let d = 0; d < 2; d++) {
+    const date = bjDate(-d);
+    let files = [];
+    try { files = fs.readdirSync(path.join(ROOT, 'queue')).filter((f) => f.startsWith(`${date}-`) && f.endsWith(`-${local}.json`)); } catch { }
+    for (const f of files) {
+      const q = readJson(path.join(ROOT, 'queue', f), []);
+      if (Array.isArray(q)) for (const e of q) if (e && e.text) set.add(String(e.text).trim());
+    }
+  }
+  return set;
 }
 
 (async () => {
@@ -52,6 +68,7 @@ function enqueuedToday(local) {
 
   for (const b of SRC.bindings || []) {
     if (!b.bound) continue;
+    if (PULL_ONLY && b.local !== PULL_ONLY) continue; // 10-20 修复：PULL_ONLY 声明后从未生效——fullwin 常驻每小时/看门狗拉起都给全矩阵误滴（11:26 重滴事故通道）；常驻进程只许碰自己的号
     const acct = CFG.accounts.find((a) => a.key === b.local);
     if (!acct) { LOG(`绑定 ${b.local} 无本地账号，跳过`); continue; }
     const bufFile = path.join(STATE_DIR, `content-buffer-${b.local}.json`);
@@ -104,38 +121,63 @@ function enqueuedToday(local) {
     if (keyFailed) why = 'key失效全停';
     else if (!canPublish) why = `未授权/未开闸(publishAuth=${b.publishAuth},publish=${b.publish})`;
     else if (isWeekend) why = '周末不投递（拍板 P5）';
-    else if (unconsumed.length) why = `投递箱未消费(${unconsumed.join(',')})`;
     else {
       const BA = (CFG.posts && CFG.posts.budgetByAccount || {})[b.local] || BUDGET;
       const w = nextWindow();
       const allocR = (BA.windowAllocation || {})[w] ?? 0;
-      const alloc = allocR && typeof allocR === 'object' ? (allocR.min + Math.floor(Math.random() * (allocR.max - allocR.min + 1))) : allocR; // 区间对象→随机数（10-19 修复：对象直接进 Math.min = NaN）
-      const drip = Math.min(alloc, (BA.perDay || 2) - enqueuedToday(b.local), st.buffer.length);
-      if (drip <= 0) why = `预算/缓冲不足(${w}窗=${alloc}，今日已入队=${enqueuedToday(b.local)}，缓冲=${st.buffer.length})`;
+      // 10-20 定稿：{min,max} 区间用"日期+窗+账号"做种子掷确定数，与 planner 消费帽同源同数（原两边各自随机=滴3条帽6条的错位）
+      const seedRoll = (mn, mx) => { const s = `${bjDate(0)}|${w}|${b.local}|${mn}|${mx}`; let hh = 0; for (let i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return mn + (hh % (mx - mn + 1)); };
+      const alloc = allocR && typeof allocR === 'object' ? seedRoll(allocR.min, allocR.max) : allocR;
+      const posted = postedTexts(b.local);
+      // 存量未消费文件（10-20 补足制，拆"一文件堵一窗"）：全重复→归档 .done-dup 解锁；部分有效→留作基座按窗配额定稿数补差额
+      let base = [];
+      if (unconsumed.length) {
+        const f0 = unconsumed.sort()[0];
+        const items = (readJson(path.join(INBOX, f0), []) || []).filter((x) => x && x.text);
+        const fresh = items.filter((x) => !posted.has(String(x.text).trim()));
+        if (!fresh.length && items.length) {
+          if (DRY) LOG(`[DRY] 应归档全重复投递文件: ${f0}（${items.length} 条均已入过今日队列）`);
+          else { try { fs.renameSync(path.join(INBOX, f0), path.join(INBOX, f0 + '.done-dup-' + Date.now())); LOG(`归档全重复投递文件: ${f0}（${items.length} 条均已入过今日队列）`); } catch { } }
+        } else base = fresh.map((x) => ({ text: x.text, quote: !!x.quote, quoteUrl: x.quoteUrl || null }));
+      }
+      const perDayLeft = (BA.perDay || 2) - enqueuedToday(b.local);
+      const deficit = Math.min(alloc, perDayLeft) - base.length;
+      if (deficit <= 0) why = base.length ? `投递箱存量 ${base.length} 条已达窗配额定稿 ${alloc}（补足制，无需新滴）` : `预算不足(${w}窗=${alloc}，今日已入队=${enqueuedToday(b.local)})`;
       else if (!DRY) {
-        const batch = st.buffer.splice(0, drip);
-        if (batch.length > 0) {
-          writeJson(path.join(INBOX, `pull-${b.local}-${Date.now()}.json`), batch.map((x) => ({ text: x.text, quote: x.quote || undefined, quoteUrl: x.quoteUrl || undefined })));
-          wrote = drip;
-        } else {
-          why = '滴灌批次为空（缓冲内容全部过期），不写空文件'; // 10-19 修复：空文件曾在投递箱死锁全天发布
+        const batch = [];
+        for (const x of st.buffer) {
+          if (batch.length >= deficit) break;
+          const t = String(x.text).trim();
+          if (posted.has(t) || base.some((y) => String(y.text).trim() === t) || batch.some((y) => String(y.text).trim() === t)) continue; // 文本级去重（近2天已发/已排/本批内）
+          batch.push(x);
         }
-        // 即时轻通道（仅非 run 授权号）：拉起该号自己的 planner(post)+executor；带健康门（suspended/敏感→不发）
-        if (roleOf(b.local) !== 'run' && drip > 0) {
-          let gate = '通过';
-          try {
-            const snap = readJson(path.join(STATE_DIR, 'health-snapshots', `${bjDate(0)}.json`), {});
-            const e = snap.accounts && snap.accounts[b.local];
-            if (e && ((e.verdict === 'suspended') || (e.profile && e.profile.state === 'suspended') || (e.statuses && (e.statuses.sensitiveCount || 0) > 0))) gate = '停发';
-          } catch { }
-          if (gate === '停发') { why = '健康门：停发（suspended/敏感标记），投递保留待下轮'; wrote = 0; st.buffer = batch.concat(st.buffer); }
-          else {
-            const { spawn } = require('child_process');
-            spawn(process.execPath, [path.join(ROOT, 'planner.js'), '--account', b.local, '--mode', 'post', '--window', w], { detached: true, stdio: 'ignore', cwd: ROOT }).unref();
-            LOG(`[${b.local}] 即时通道：planner(post,${w}) 已拉起（run 号走三窗，此号拉完即排）`);
+        if (!batch.length) why = `缓冲无新鲜文本（需补 ${deficit}，缓冲 ${st.buffer.length} 条全是近2天已发/已排）`;
+        else {
+          // 即时轻通道健康门前置（仅非 run 授权号）：先过门再写文件，不过门则不写不耗缓冲
+          if (roleOf(b.local) !== 'run') {
+            let gate = '通过';
+            try {
+              const snap = readJson(path.join(STATE_DIR, 'health-snapshots', `${bjDate(0)}.json`), {});
+              const e = snap.accounts && snap.accounts[b.local];
+              if (e && ((e.verdict === 'suspended') || (e.profile && e.profile.state === 'suspended') || (e.statuses && (e.statuses.sensitiveCount || 0) > 0))) gate = '停发';
+            } catch { }
+            if (gate === '停发') { why = '健康门：停发（suspended/敏感标记），投递保留待下轮'; }
+          }
+          if (!why) {
+            const used = new Set(batch.map((x) => x.hash));
+            st.buffer = st.buffer.filter((x) => !used.has(x.hash));
+            const all = base.concat(batch.map((x) => ({ text: x.text, quote: x.quote || undefined, quoteUrl: x.quoteUrl || undefined })));
+            if (base.length) writeJson(path.join(INBOX, unconsumed.sort()[0]), all); // 补足原文件（同名复写，planner 整文件消费）
+            else writeJson(path.join(INBOX, `pull-${b.local}-${Date.now()}.json`), all);
+            wrote = batch.length;
+            if (roleOf(b.local) !== 'run') {
+              const { spawn } = require('child_process');
+              spawn(process.execPath, [path.join(ROOT, 'planner.js'), '--account', b.local, '--mode', 'post', '--window', w], { detached: true, stdio: 'ignore', cwd: ROOT }).unref();
+              LOG(`[${b.local}] 即时通道：planner(post,${w}) 已拉起（run 号走三窗，此号拉完即排）`);
+            }
           }
         }
-      } else why = `[DRY] 应滴灌 ${drip} 条（未写入）`;
+      } else why = `[DRY] 应补足 ${deficit} 条（基座 ${base.length}，未写入）`;
     }
     if (!DRY) writeJson(bufFile, st);
     audit({ action: 'pull', account: b.local, source: b.source, fetched, fresh, dropped, buffered: st.buffer.length, wrote, note: why || undefined, dry: DRY || undefined });

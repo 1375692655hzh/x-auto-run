@@ -53,7 +53,7 @@ async function chat(opts = {}) {
  * - brief: 本次任务补充要求（如"正向留言，引导互相串门"）
  * - history: 我方近期已发回复列表（防重复，取末尾 5 条）
  */
-async function generateReply({ post, author, persona, brief, history = [], channel }) {
+async function generateReply({ post, author, persona, brief, history = [], channel, maxLen }) {
   if (!post || !persona) throw new Error('generateReply 需要 post 与 persona');
   const system = [
     `你是 X(Twitter) 账号的运营者本人，用第一人称回复别人的帖子。`,
@@ -61,7 +61,7 @@ async function generateReply({ post, author, persona, brief, history = [], chann
     brief ? `本次任务要求：${brief}` : '',
     '',
     '硬规则：',
-    '- 1 到 2 句，中文，总字数不超过 120，口语自然，符合人设口吻',
+    maxLen ? `- 中文，总字数不超过 ${maxLen}，越短越好，口语自然，符合人设口吻` : '- 1 到 2 句，中文，总字数不超过 120，口语自然，符合人设口吻', // maxLen 可覆写（10-20 拍板：fullwin 光速回复=≤20 字）
     '- 必须回应原帖的具体内容或观点（呼应其中细节，不空泛）',
     '- 可以自然表达希望互相来往/互相关注的意思，但不得声称还没发生的动作（如未关注就说"已关注"）',
     '- 禁止：链接、话题标签(#)、@提及任何账号、AI 身份声明、通用套话（如"说得真好""支持""学习了"）',

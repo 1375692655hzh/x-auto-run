@@ -4,11 +4,13 @@
 //   node executor.js --account butcher --queue queue/2026-10-16-am-butcher.json [--window am] [--dry] [--max-actions N]
 // 队列条目: { id, account, type: reply|follow|like, postUrl?, statusId?, targetHandle?, text?,
 //             followFirst?, window?: am|mid|pm, ttlMin?, status, result?, createdAt }
-//   status: planned → intent → done|unknown|failed ；intent 卡死(崩溃) → 复跑时转 unknown，**绝不重试**
+//   status: planned → intent → done|unknown|failed ；intent 卡死(崩溃) → 复跑时转 unknown → 30min 后匿名核验，未发翻回重跑（≤2 次）
 // exactly-once 三件套:
 //   ①发送前先落盘 intent（崩溃后可辨"可能已发出"）
-//   ②unknown = 结果不明：占额度、记待核、禁重试
+//   ②unknown = 结果不明：先占额度记待核，30min 后 FxTwitter 匿名核验（verify-unknown.js）——已发记 done，未发翻回 planned 补跑节重发
 //   ③账号级文件锁：定时与手动互斥；残留锁超时(30min)自动接管
+// 交付必达（2026-10-20 用户拍板）：连败熔断已拆（单点失败只记日志不殃及队列）；瞬态错误 3 次退避重试+收尾翻回；
+//   唯一整窗刹车=风控 toast（X 官方真实信号）与 state/PAUSE。
 // 滚动账本: state/ledger-<account>.json 动作时间戳数组，跨进程持久化，替代自然日重置；
 //   过渡期与 boost.js 同日计数合并对账（切换完成后移除合并逻辑）。
 // 测试钩子（仅测试用）: EXECUTOR_SIMULATE=1 全状态机不开浏览器；EXECUTOR_CRASH_AFTER_INTENT=1 写完 intent 即 exit(70)。
@@ -436,10 +438,10 @@ function executeAction(page, entry) {
   }
 
   let locked = false;
-  for (let attempt = 1; attempt <= 8; attempt++) { try { acquireLock(); locked = true; break; } catch (le) { if (attempt === 8) throw le; console.log(`[锁等待] ${le.message}，75 秒后重试(${attempt}/8)`); await sleep(75000); } } // 10-18：定时单条与执行窗可能撞锁，等待让路而非放弃
+  for (let attempt = 1; attempt <= 16; attempt++) { try { acquireLock(); locked = true; break; } catch (le) { if (attempt === 16) throw le; console.log(`[锁等待] ${le.message}，75 秒后重试(${attempt}/16)`); await sleep(75000); } } // 10-18：定时单条与执行窗可能撞锁，等待让路而非放弃；10-20 补跑节与定时帖并发增多，8→16
   if (reconciled) { saveQueue(queue); log({ action: 'reconcile', unknown: reconciled }); }
   const deadline = Date.now() + X.sessionMaxMinutes * 60000;
-  let done = 0, fails = 0, browser = null, ws = null;
+  let done = 0, browser = null, ws = null;
   const stats = { executed: [], skipped: [], unknown: [], failed: [] };
   try {
     let page = null;
@@ -447,15 +449,32 @@ function executeAction(page, entry) {
       ws = await openWindow(ACCT.profileId);
       browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
       page = await browser.newPage();
+      page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开（10-20 全天协议超时根因）
       await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
       await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
       if (!(await verifyLogin(page, ACCT.handle))) throw new Error(`登录态校验失败：期望 @${ACCT.handle}`);
     }
-    for (const e of queue) {
+    // 选品器（10-20 用户拍板"交付必达"）：到点定时帖永远插队先发（排期误差压到秒级，不再被主轮锁压 30-45 分钟）；
+    // 其余按队列顺序。死线只收本会话不判死队列——planned 项留给补跑节/round --entry 续跑
+    const nextItem = () => {
+      if (ENTRY_ID) { const x = queue.find((y) => y.id === ENTRY_ID); return (x && x.status === 'planned') ? x : null; }
+      const now = Date.now();
+      let first = null;
+      for (const e of queue) {
+        if (e.status !== 'planned') continue;
+        if (WINDOW && e.window && e.window !== WINDOW) continue;
+        if (e.type === 'post' && e.postAt) {
+          if (Date.parse(e.postAt) <= now + 5000) return e; // 到点帖插队即发
+          continue; // 未到点：留给后续扫描或 round --entry 拉起
+        }
+        if (!first) first = e;
+      }
+      return first;
+    };
+    while (true) {
       if (sessionAborted || Date.now() > deadline || done >= MAX_ACTIONS) break;
-      if (e.status !== 'planned') continue;
-      if (ENTRY_ID && e.id !== ENTRY_ID) continue; // 单条模式：跳过其他条目
-      if (WINDOW && e.window && e.window !== WINDOW) continue;
+      const e = nextItem();
+      if (!e) break;
       const ageMin = (Date.now() - Date.parse(e.createdAt)) / 60000;
       if (ageMin > (e.ttlMin || X.queueTtlMinutes)) { e.status = 'skipped'; e.result = 'TTL 过期'; stats.skipped.push(e.id); continue; }
       // 权重维护条目（v1.1 M2）：按发帖时间复查黄金窗，过期放弃；固定窗版（10-19 拍板，e.fixed）不守黄金窗——12:35/19:35 撞不上 45-180min，改为 maintain-fixed 已在选帖时限帖龄 20min~14h
@@ -470,12 +489,11 @@ function executeAction(page, entry) {
         e.text = qc.cleaned;
       }
       if (capLeftRolling(e.type) <= 0) { e.status = 'skipped'; e.result = `滚动24h额度不足(${e.type})`; stats.skipped.push(e.id); continue; }
-      // 定时发布（10-18 拍板）：postAt 未到的帖在普通会话里跳过（由 round 到点用 --entry 单独拉起）；间隔保护=相邻帖 ≥60 秒
+      // 定时发布（10-18 拍板）：到点判定已上移至选品器（postAt 未到的帖根本不会被选中）；
+      // 间隔保护=相邻帖 ≥60 秒：不足则顺延等待（而非跳过）——账本时间戳记在尝试时，
+      // 批量过期帖紧接着进入循环会被误杀（10-19 实战：butcher 白丢 2 条）；等待上限 90 秒，超出仍跳过
+      // 账本已 filter(Number.isFinite)，lastPost 恒为有限数或 0
       if (e.type === 'post') {
-        if (e.postAt && !ENTRY_ID && Date.parse(e.postAt) > Date.now() + 30000) { continue; } // 未到点：本轮会话不碰（状态保持 planned）
-        // 间隔保护=相邻帖 ≥60 秒：不足则顺延等待（而非跳过）——账本时间戳记在尝试时，
-        // 批量过期帖紧接着进入循环会被误杀（10-19 实战：butcher 白丢 2 条）；等待上限 90 秒，超出仍跳过
-        // 账本已 filter(Number.isFinite)，lastPost 恒为有限数或 0
         const lastPost = Math.max(0, ...((LEDGER.actions.post || []).filter(Number.isFinite)));
         if (lastPost > 0) {
           const gapLeft = 60 * 1000 - (Date.now() - lastPost);
@@ -506,13 +524,17 @@ function executeAction(page, entry) {
         await gsleep(X.followFirstGapGaussMs);
       }
       r = await executeAction(page, e).catch((err) => ({ ok: false, note: err.message }));
-      // 瞬态错误（协议超时/网络抖动，10-20 P2 实战：wcixot 3 连瞬态误触熔断整窗陪葬）：重试一次，仍败不计连败
-      const TRANSIENT = /Protocol error|timed out|TimeoutError|net::|ERR_/i.test((r && r.note) || '');
-      if (!r.ok && TRANSIENT) {
-        await sleep(8000);
-        r = await executeAction(page, e).catch((err) => ({ ok: false, note: err.message + '（重试后仍瞬态）' }));
-        if (r.ok) r.note = '瞬态重试成功';
+      // 瞬态错误（协议超时/网络抖动）：3 次退避重试（8/15/30s）——10-20 用户拍板"交付必达"：单点抖动不许丢量。
+      // 仍败记 failed 并打 transientFail 标记（不投任何票），会话收尾时翻回 planned 交补跑节再试（retryRound<2 封顶防死循环）
+      const isTransient = (rr) => /Protocol error|timed out|TimeoutError|net::|ERR_/i.test((rr && rr.note) || '');
+      let transient = isTransient(r);
+      for (let a = 0; !r.ok && !r.unknown && transient && a < 3; a++) {
+        await sleep([8000, 15000, 30000][a]);
+        r = await executeAction(page, e).catch((err) => ({ ok: false, note: err.message }));
+        transient = isTransient(r);
+        if (r.ok) r.note = '瞬态重试成功(第' + (a + 1) + '次重试)';
       }
+      if (!r.ok && !r.unknown && transient) r.note = (r.note || '') + '（瞬态重试3次仍败）';
 
       if (r.ok) { e.status = 'done'; e.result = SIMULATE ? 'simulated' : 'ok'; done += 1; stats.executed.push(e.id); if (e.type === 'reply') { syncContacts(e, 'reply'); recordReply(e); } if (e.type === 'follow') syncContacts(e, 'follow'); }
       else if (r.unknown) { e.status = 'unknown'; e.result = '结果不明（占额度，禁重试，待核）: ' + (r.note || ''); stats.unknown.push(e.id); }
@@ -524,11 +546,11 @@ function executeAction(page, entry) {
       else if (e.kind === 'maintain' && /未找到目标帖|页面加载失败/.test(r.note || '')) {
         e.status = 'skipped'; e.result = '目标帖不可见（维护跳过）: ' + (r.note || ''); stats.skipped.push(e.id);
       }
+      // 失败处理（10-20 拍板"交付必达"）：连败熔断已拆——单条失败只记日志，队列永远继续；
+      // 瞬态失败打标记，会话收尾翻回 planned 交补跑节再试。唯一整窗刹车=下方风控 toast
       else {
         e.status = 'failed'; e.result = r.note || '失败'; stats.failed.push(e.id);
-        if (TRANSIENT) { /* 瞬态错误不投熔断票（10-20 拍板）：连败熔断只数真失败 */ }
-        else fails += 1;
-        if (fails >= (L.consecutiveFailAbort || 3)) { sessionAborted = true; }
+        if (transient) e.transientFail = true;
       }
       saveQueue(queue);
       log({ action: 'execute', kind: e.kind || undefined, id: e.id, type: e.type, target: e.targetHandle || e.statusId, status: e.status, note: e.result, text: (e.type === 'post' || e.type === 'reply') ? String(e.text).slice(0, 60) : undefined });
@@ -539,9 +561,18 @@ function executeAction(page, entry) {
       }
       if (done < MAX_ACTIONS) await gsleep(X.actionGapGaussMs);
     }
-    // 会话中止只清本会话要处理的条目；未到点的定时帖（postAt 在未来）留给 round 到点 --entry 拉起，
-    // 不再陪葬（10-19 实战：wcixot 串门 3 连败触发熔断，误杀 5 条待发定时帖）
-    if (sessionAborted) for (const e of queue) if (e.status === 'planned' && !(e.type === 'post' && e.postAt && Date.parse(e.postAt) > Date.now())) { e.status = 'skipped'; e.result = '会话中止'; stats.skipped.push(e.id); saveQueue(queue); }
+    // 交付必达（10-20 拍板）：熔断已拆，不再有任何"会话中止清场"——planned 项永远不死在队列里。
+    // 会话收尾：瞬态失败项翻回 planned（retryRound<2 封顶），由补跑节/下一窗续跑；风控刹车时不翻（当日已停）
+    if (!sessionAborted) {
+      let requeued = 0;
+      for (const e of queue) {
+        if (e.status === 'failed' && e.transientFail && (e.retryRound || 0) < 2) {
+          e.status = 'planned'; e.retryRound = (e.retryRound || 0) + 1; delete e.transientFail;
+          e.result = (e.result || '') + ' → 翻回待跑（补跑第' + e.retryRound + '轮）'; requeued += 1;
+        }
+      }
+      if (requeued) { saveQueue(queue); log({ action: 'requeue', count: requeued }); }
+    }
   } finally {
     // 关闭多余页签再断开（10-19 修复：定时发帖多个 executor 进程共用窗口，各自关自己的 page
     // 会留下别人的页签→累积 22 个。改为全量清理；

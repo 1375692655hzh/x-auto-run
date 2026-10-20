@@ -92,4 +92,55 @@ const run = (args, opts = {}) => {
   log({ action: 'round', window: WINDOW, dry, plannerOk: okPlan, executorOk: okExec, scheduledPosts: posts.length });
   if (okExec) { rs.completed += 1; saveRounds(rs); }
   console.log(`执行窗 ${WINDOW} 结束（${dry ? '演练' : '真实'}${posts.length ? `；${posts.length} 条定时帖待发（进程驻留到点拉起）` : ''}）`);
+
+  // ── 交付必达（2026-10-20 用户拍板）：队列跑不完绝不收工 ──
+  // ①补跑节：主会话收口后仍有 planned（死线截断/瞬态翻回/核验翻回）→ 15 分钟后续跑同一队列，直到跑空或 21:45 收口线（activeHours 22 点收）
+  // ②unknown 核验：会话产出 unknown → 30 分钟后 verify-unknown.js 匿名核验，未发出的翻回 planned 并立即续评估补跑
+  // 唯一刹车：风控 toast 当日锁（executor 写 ledger.meta.abortedToday）与 PAUSE 文件
+  const ledgerFile = path.join(STATE_DIR, `ledger-${ACCOUNT}.json`);
+  const abortedToday = () => { try { return (JSON.parse(fs.readFileSync(ledgerFile, 'utf8')).meta || {}).abortedToday === today(); } catch { return false; } };
+  const queueNow = () => { try { const q = JSON.parse(fs.readFileSync(queueFile, 'utf8')); return Array.isArray(q) ? q : []; } catch { return []; } };
+  const pendingWork = () => queueNow().filter((e) => e && e.status === 'planned' && !(e.type === 'post' && e.postAt && Date.parse(e.postAt) > Date.now())).length; // 未到点帖有 round 定时器兜底，不算欠账
+  const hasUnknown = () => queueNow().some((e) => e && e.status === 'unknown');
+  let catchRound = 0, catchScheduled = false, verifyScheduled = false;
+  const cutoffReached = () => { const c = new Date(); c.setHours(21, 45, 0, 0); return Date.now() > c.getTime(); };
+  const scheduleCatchup = (delayMin, why) => {
+    if (catchScheduled || catchRound >= 8) return;
+    if (cutoffReached()) { console.log('[补跑] 已过 21:45 收口线，剩余 planned 留档（不窗外执行）'); log({ action: 'catchupStop', note: '过21:45收口线' }); return; }
+    if (abortedToday()) { console.log('[补跑] 风控刹车当日生效，不再补跑'); log({ action: 'catchupStop', note: '风控刹车' }); return; }
+    catchScheduled = true; catchRound += 1;
+    const n = catchRound;
+    console.log(`[补跑] 第 ${n} 节 ${delayMin} 分钟后拉起（${why}）`);
+    setTimeout(() => {
+      catchScheduled = false;
+      if (abortedToday()) { log({ action: 'catchupStop', note: '风控刹车' }); return; }
+      const left = pendingWork();
+      if (!left) { console.log('[补跑] 队列已空，收工'); log({ action: 'catchupStop', note: '队列已空' }); return; }
+      console.log(`\n===== 补跑节 #${n}（剩 ${left} 条 planned） =====`);
+      run([path.join(ROOT, 'executor.js'), '--account', ACCOUNT, '--queue', queueFile, '--window', WINDOW]);
+      log({ action: 'catchup', round: n, leftBefore: left, leftAfter: pendingWork() });
+      armFollowups(); // 续评估：还没跑完就再排下一节
+    }, delayMin * 60000);
+  };
+  const scheduleVerify = () => {
+    if (verifyScheduled || !hasUnknown()) return;
+    if (abortedToday()) return;
+    verifyScheduled = true;
+    console.log('[核验] 30 分钟后对 unknown 条目做匿名核验（FxTwitter 只读，零暴露）');
+    setTimeout(() => {
+      verifyScheduled = false;
+      if (abortedToday()) { log({ action: 'verifySkip', note: '风控刹车' }); return; }
+      if (!hasUnknown()) return;
+      console.log('\n===== unknown 自动核验 =====');
+      run([path.join(ROOT, 'verify-unknown.js'), '--account', ACCOUNT, '--queue', queueFile]);
+      log({ action: 'verifyUnknown', pendingAfter: pendingWork() });
+      armFollowups(); // 核验翻回的条目立即续评估
+    }, 30 * 60000);
+  };
+  function armFollowups() {
+    const left = pendingWork();
+    if (left > 0) scheduleCatchup(15, `剩 ${left} 条 planned`);
+    if (hasUnknown()) scheduleVerify();
+  }
+  if (!dry) armFollowups();
 })().catch((e) => { console.error(e); process.exit(1); });

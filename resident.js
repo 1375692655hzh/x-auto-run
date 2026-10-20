@@ -192,6 +192,7 @@ async function collectPosts(page, limit = 30) {
 // ── 动作隔离与瞬态重试（10-20：巡逻 8/8 轮协议挂起的修复） ──
 async function withTempPage(bro, fn) { // bro=浏览器实例由调用方传入（模块级定义拿不到主流程的 browser——14:14 实战踩坑）
   const pg = await bro.newPage();
+  pg.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿弹窗自动点"离开"（10-20 全天协议超时真凶：X 的 beforeunload 模态框卡死整个 CDP 通道）
   await pg.setViewport({ width: 1400 + randi(0, 80), height: 900 });
   try { return await fn(pg); } finally { try { await pg.close(); } catch { } }
 }
@@ -238,6 +239,8 @@ if (WATCHDOG) {
   const pageReply = await browser.newPage(); await pageReply.setViewport({ width: 1400 + randi(0, 120), height: 900 });
   const pageTopic = await browser.newPage(); await pageTopic.setViewport({ width: 1400 + randi(0, 120), height: 900 });
   const pagePost = await browser.newPage(); await pagePost.setViewport({ width: 1400 + randi(0, 120), height: 900 });
+  // 三个常驻页全部自动应答模态框（beforeunload"离开此网站"等）——10-20 全天协议超时根因
+  for (const pg of [pageReply, pageTopic, pagePost]) pg.on('dialog', (d) => d.accept().catch(() => { }));
   await pageReply.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { });
   if (!(await verifyLogin(pageReply, ACCT.handle))) { console.error('登录态校验失败'); await cleanup(); process.exit(1); }
 
@@ -308,7 +311,7 @@ if (WATCHDOG) {
         if (DRY) { LOG(`[DRY] 应回复 @${it.author} 的通知 ${it.href}`); continue; }
         const postUrl = 'https://x.com' + it.href;
         const statusId = (it.href.match(/status\/(\d+)/) || [])[1];
-        const r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是一条对方发给我们（回复或提及）的消息，作为帖子主人礼貌、具体地回应对方。', history: [], channel: RC.llmChannel }).catch(() => null);
+        const r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是一条对方发给我们（回复或提及）的消息，作为帖子主人礼貌、具体地回应对方；回复控制在 20 字以内，像随手回的真人，越短越好。', history: [], channel: RC.llmChannel, maxLen: RC.replyMaxLen || 20 }).catch(() => null);
         const qc = r && r.text ? quality.check(r.text, {}) : null;
         if (qc && qc.ok) {
           sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: qc.cleaned, sendAt: Date.now() + rand(RC.replyDelayMin[0], RC.replyDelayMin[1]) * 60000 });
@@ -413,34 +416,37 @@ if (WATCHDOG) {
     const now = new Date();
     const hourKey = `${today()}-${now.getHours()}`;
     try {
-      // 互动三路守互动窗（夜里只发帖不互动）
-      if (interactOk() && Date.now() >= nextReplyPoll) { await pollNotifications(); nextReplyPoll = Date.now() + RC.replyPollMin * 60000; if (aborted) break; }
-      if (interactOk() && Date.now() >= nextPatrol) { await patrol(); nextPatrol = Date.now() + rand(RC.patrolGapMin[0], RC.patrolGapMin[1]) * 60000; if (aborted) break; }
-      if (interactOk() && Date.now() >= nextPost) { await postHourly(); nextPost = Date.now() + rand(RC.postGapMin[0], RC.postGapMin[1]) * 60000; if (aborted) break; }
-      // 云帖改每小时跟随（10-20 拍板，上游每小时:40 出文）：每小时的 :50 拉取，当小时额度=白天2/夜里1
-      if (!DRY && now.getMinutes() >= (RC.cloudPullMinute != null ? RC.cloudPullMinute : 50) && st.lastCloudHour !== hourKey) {
-        st.lastCloudHour = hourKey; saveSt(st); await cloudSlot(hourKey); if (aborted) break;
-      }
-      // 延迟发送队列（DRY 不执行任何真实发送）
+      // 延迟发送队列最先（10-20 饥饿事故：巡逻长轮占满循环，12 条入队光速回复被饿死——
+      // 回复用户是最高优先级；定时器先推进再执行，防异常/长耗时后立即重跑）
       for (let i = sendQueue.length - 1; i >= 0 && !DRY; i--) {
         const q = sendQueue[i];
         if (q.sendAt > Date.now()) continue;
         sendQueue.splice(i, 1);
         if (q.kind === 'replyInbox') {
-          const rr = await replyOnPage(pageReply, q.statusId, q.postUrl, q.text);
+          // 队列发送也包瞬态重试+兜底捕获（10-20：裸 replyOnPage 抛 ProtocolError 会把条目吃掉并冒泡打断主循环）；
+          // 且走独立临时页（对照实锤：长期停在通知页的 pageReply 会 wedge，临时页从未卡过）
+          const rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, q.statusId, q.postUrl, q.text))).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
           if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(q.author); audit({ action: 'inboxReply', target: q.author, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
           else audit({ action: 'inboxReply', target: q.author, status: 'failed', note: rr.note });
           if (await checkAbort(pageReply, '光速回复')) break;
         } else if (q.kind === 'cloud') {
           if (usedToday('post') >= RC.postCapDay) { audit({ action: 'cloudPost', status: 'skipped', note: '帖帽满' }); continue; }
-          const rr = await postOnPage(pagePost, q.text);
+          const rr = await retryTransient(() => postOnPage(pagePost, q.text)).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
           if (rr.ok || rr.unknown) { ledgerRecord('post'); audit({ action: 'cloudPost', status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40), note: rr.note }); }
           else audit({ action: 'cloudPost', status: 'failed', note: rr.note });
           if (await checkAbort(pagePost, '云帖')) break;
         }
       }
+      // 互动三路守互动窗（夜里只发帖不互动）；定时器先推进再执行（防异常/长耗时后立即重跑饿死队列）
+      if (interactOk() && Date.now() >= nextReplyPoll) { nextReplyPoll = Date.now() + RC.replyPollMin * 60000; await pollNotifications(); if (aborted) break; }
+      if (interactOk() && Date.now() >= nextPatrol) { nextPatrol = Date.now() + rand(RC.patrolGapMin[0], RC.patrolGapMin[1]) * 60000; await patrol(); if (aborted) break; }
+      if (interactOk() && Date.now() >= nextPost) { nextPost = Date.now() + rand(RC.postGapMin[0], RC.postGapMin[1]) * 60000; await postHourly(); if (aborted) break; }
+      // 云帖改每小时跟随（10-20 拍板，上游每小时:40 出文）：每小时的 :50 拉取，当小时额度=白天2/夜里1
+      if (!DRY && now.getMinutes() >= (RC.cloudPullMinute != null ? RC.cloudPullMinute : 50) && st.lastCloudHour !== hourKey) {
+        st.lastCloudHour = hourKey; saveSt(st); await cloudSlot(hourKey); if (aborted) break;
+      }
       if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { LOG('PAUSE 出现，退出'); break; }
-    } catch (e) { LOG('主循环异常(继续): ' + String(e.message).slice(0, 80)); audit({ action: 'loopError', note: String(e.message).slice(0, 80) }); }
+    } catch (e) { LOG('主循环异常(继续): ' + String(e.stack || e.message).slice(0, 200)); audit({ action: 'loopError', note: String(e.stack || e.message).slice(0, 160) }); }
     await sleep(20 * 1000);
   }
   st.heartbeatAt = null; saveSt(st);

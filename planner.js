@@ -99,8 +99,10 @@ async function planVisit(ts) {
   const queuedHandles = new Set();
   for (const w of WINS) for (const e of loadQueue(w)) if (e.status !== 'skipped' && e.targetHandle) queuedHandles.add(e.targetHandle);
   const baseId = loadQueue(WINDOW).length; // 补跑时 ID 续编，避免重复
-  // 14天真关系门槛（2026-10-16 用户拍板：只计近2周与本号的真实互动；Owen圈候选默认不用于串门）
-  const cutoff14 = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+  // 30天真关系窗（10-20 用户拍板放宽 14→30："串门供给必达"——butcher 池仅 14 人曾晚窗只排到 1 条；
+  // 互关成功对象由 executor.syncContacts 自动入池（weFollow.since 即新鲜真互动），供给随运营自增长）
+  const freshDays = (CFG.rounds || {}).visitFreshDays || 30;
+  const cutoffReal = new Date(Date.now() - freshDays * 86400000).toISOString().slice(0, 10);
   const lastReal = (e) => {
     const evs = (e.activity && e.activity.theirEvents || []).filter((x) => x[2] === 'own-notif').map((x) => x[0]);
     if (e.activity && e.activity.ourLastReplyAt) evs.push(e.activity.ourLastReplyAt);
@@ -116,20 +118,26 @@ async function planVisit(ts) {
     if (out.length >= cap) break;
     if (queuedHandles.has(e.handle)) continue; // 今日已排过的不重复
     const lr = lastReal(e);
-    if (!lr || lr < cutoff14) continue; // 近14天与本号无真实互动 → 不选（含 Owen 圈候选）
+    if (!lr || lr < cutoffReal) continue; // 近30天与本号无真实互动 → 不选（含 Owen 圈候选）
     // 限频：互关好友 7 天 1 条，其他 21 天 1 条（taskstate 与 contacts 双查）
     const cd = (e.relation && e.relation.mutual) || e.stage === 'active' ? 7 : 21;
     const last = ts.repliedAuthors[e.handle] || (e.activity && e.activity.ourLastReplyAt) || null;
     if (last && dayDiff(last, today()) < cd) continue;
     const post = await fetchLatestPost(e.handle);
     if (!post) continue; // 72h 无自发新帖 → 跳过不凑数
-    try {
-      const r = await generateReply({ post: post.text, author: e.handle, persona: PERSONA, brief: briefOf('visit'), history: ts.replyHistory.slice(-8) });
-      const qc = quality.check(r.text, { history: ts.replyHistory });
-      if (!qc.ok) { console.log(`  质量门未过(@${e.handle}): ${qc.reason}`); continue; }
-      out.push({ id: `${today()}-${WINDOW}-visit-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'visit', postUrl: post.postUrl, statusId: post.statusId, targetHandle: e.handle, text: qc.cleaned, followFirst: false, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
-      console.log(`  串门入队 @${e.handle}（${e.stage}，分${e.score}）：${qc.cleaned.slice(0, 36)}…`);
-    } catch (err) { console.log(`  LLM 失败(@${e.handle}): ${String(err.message).slice(0, 80)}`); }
+    // 生成失败换语气重试 1 次（10-20 拍板"交付必达"：质量门淘汰不许丢计划量；仍不过才放弃该候选）
+    let qc = null;
+    for (let g = 0; g < 2; g++) {
+      try {
+        const r = await generateReply({ post: post.text, author: e.handle, persona: PERSONA, brief: briefOf('visit'), history: ts.replyHistory.slice(-8) });
+        qc = quality.check(r.text, { history: ts.replyHistory });
+      } catch (err) { console.log(`  LLM 失败(@${e.handle}): ${String(err.message).slice(0, 80)}`); qc = null; break; }
+      if (qc.ok) break;
+      console.log(`  质量门未过(@${e.handle}，第${g + 1}次): ${qc.reason}${g === 0 ? '，重试' : ''}`);
+    }
+    if (!qc || !qc.ok) continue;
+    out.push({ id: `${today()}-${WINDOW}-visit-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'visit', postUrl: post.postUrl, statusId: post.statusId, targetHandle: e.handle, text: qc.cleaned, followFirst: false, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
+    console.log(`  串门入队 @${e.handle}（${e.stage}，分${e.score}）：${qc.cleaned.slice(0, 36)}…`);
     await sleep(rand(800, 1600));
   }
   return out;
@@ -195,18 +203,21 @@ async function planCommunity(ts) {
   const tags = CFG.task2.hashtags;
   // 每窗多话题扫描凑配额（10-20 修复：原"一轮一话题"使整窗配额押在单话题瞬时状态上——
   // wcixot p1 轮到干涸的 #浇朋友 7 条全筛 → 0/14 事故；K3 原设计本就是轮换多话题）
+  // 10-20 深夜二次加固（交付必达）：topicsPerScan=3 是下限不是上限——没凑满 cap+3 就轮完全部话题，杜绝"3 话题同时干涸"死角
   const topicsPerScan = Math.max(1, (CFG.task2 || {}).topicsPerScan || 3);
+  const maxTopics = Math.max(topicsPerScan, tags.length);
   const ws = await openWindow(ACCT.profileId);
   let cands = [];
   try {
     const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
     const page = await browser.newPage();
+    page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开
     try {
       await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
       await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
       if (!(await verifyLogin(page, ACCT.handle))) throw new Error('登录态校验失败');
-      for (let ti = 0; ti < topicsPerScan; ti++) {
-        if (!DIAG && cands.length >= cap + 3) break; // 凑够即止，不多扫
+      for (let ti = 0; ti < maxTopics; ti++) {
+        if (!DIAG && cands.length >= cap + 3 && ti >= topicsPerScan) break; // 凑够下限后才允许提前收；未凑满轮完全部话题
         const tag = tags[ts.tagIndex % tags.length];
         ts.tagIndex += 1; saveTaskstate(ts);
       await page.goto(`https://x.com/search?q=${encodeURIComponent('#' + tag)}&f=live`, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -240,13 +251,19 @@ async function planCommunity(ts) {
   for (const p of cands) {
     if (out.length >= cap) break;
     if (queuedHandles.has(p.author)) continue;
-    try {
-      const r = await generateReply({ post: p.text, author: p.author, persona: PERSONA, brief: briefOf('community'), history: ts.replyHistory.slice(-8) });
-      const qc = quality.check(r.text, { history: ts.replyHistory });
-      if (!qc.ok) { console.log(`  质量门未过(@${p.author}): ${qc.reason}`); continue; }
-      out.push({ id: `${today()}-${WINDOW}-community-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'community', postUrl: 'https://x.com' + p.link, statusId: p.id, targetHandle: p.author, text: qc.cleaned, followFirst: true, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
-      console.log(`  互关入队 @${p.author}：${qc.cleaned.slice(0, 36)}…`);
-    } catch (err) { console.log(`  LLM 失败(@${p.author}): ${String(err.message).slice(0, 80)}`); }
+    // 生成失败换语气重试 1 次（10-20 拍板"交付必达"：质量门淘汰不许丢计划量；候选有 +3 缓冲，双保险）
+    let qc = null;
+    for (let g = 0; g < 2; g++) {
+      try {
+        const r = await generateReply({ post: p.text, author: p.author, persona: PERSONA, brief: briefOf('community'), history: ts.replyHistory.slice(-8) });
+        qc = quality.check(r.text, { history: ts.replyHistory });
+      } catch (err) { console.log(`  LLM 失败(@${p.author}): ${String(err.message).slice(0, 80)}`); qc = null; break; }
+      if (qc.ok) break;
+      console.log(`  质量门未过(@${p.author}，第${g + 1}次): ${qc.reason}${g === 0 ? '，重试' : ''}`);
+    }
+    if (!qc || !qc.ok) continue;
+    out.push({ id: `${today()}-${WINDOW}-community-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'community', postUrl: 'https://x.com' + p.link, statusId: p.id, targetHandle: p.author, text: qc.cleaned, followFirst: true, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
+    console.log(`  互关入队 @${p.author}：${qc.cleaned.slice(0, 36)}…`);
     await sleep(rand(800, 1600));
   }
   return out;
@@ -267,6 +284,7 @@ async function planFollowback(ts) {
   try {
     const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
     const page = await browser.newPage();
+    page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开
     try {
       await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
       await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -342,6 +360,7 @@ async function planUnfollow(ts) {
   try {
     const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
     const page = await browser.newPage();
+    page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开
     try {
       await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
       await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -386,10 +405,14 @@ const POSTS_INBOX = path.join(ROOT, 'posts-inbox');
 async function planPost(ts) {
   const PC = Object.assign({ perWindow: 2, perDay: 10 }, CFG.posts || {});
   // 窗预算硬门（三方方案 2026-10-18）：拍板的 windowAllocation 优先于引擎帽（午窗=0 绝不发），防手工投递绕过；多号各用各的预算（budgetByAccount，10-18 wcixot 接入）
+  // 10-20 修复：{min,max} 区间对象直接进 Math.min=NaN（曾致窗帽形同虚设）——改为"日期+窗+账号"做种子掷确定数，
+  // 与 content-pull 滴灌两边算出同一个数（互不协调也不错位，杜绝滴 3 条消费帽 6 条的错位）
   const BA = ((CFG.posts || {}).budgetByAccount || {})[ACCOUNT] || (CFG.posts || {}).budget || {};
   const alloc = (BA.windowAllocation || {})[WINDOW];
+  const seedRoll = (mn, mx) => { const s = `${today()}|${WINDOW}|${ACCOUNT}|${mn}|${mx}`; let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return mn + (h % (mx - mn + 1)); };
+  const allocN = alloc && typeof alloc === 'object' ? seedRoll(alloc.min, alloc.max) : alloc;
   const inWindow = loadQueue(WINDOW).filter((e) => e.kind === 'post' && e.status !== 'skipped').length;
-  const cap = Math.min(alloc != null ? alloc : PC.perWindow, PC.perWindow, (BA.perDay != null ? BA.perDay : PC.perDay) - countedToday('post'));
+  const cap = Math.min(allocN != null ? allocN : PC.perWindow, PC.perWindow, (BA.perDay != null ? BA.perDay : PC.perDay) - countedToday('post'));
   if (cap - inWindow <= 0) { console.log('发布预算已满或本窗分配为 0（拍板档位）'); return []; }
   let files = [];
   try {
