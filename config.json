@@ -526,11 +526,38 @@
     }
   },
   "mutualPost": {
-    "accounts": ["butcher", "wcixot"],
-    "slots": { "am": 0, "mid": 1, "pm": 2 },
-    "slotTimes": { "am": "07:00", "mid": "13:00", "pm": "19:00" },
-    "tags": ["#蓝V互关", "#蓝朋友", "#浇朋友", "#浇个朋友", "#交个朋友", "#交朋友"],
-    "jitterMin": [[0, 15], [20, 35]],
+    "accounts": [
+      "butcher",
+      "wcixot"
+    ],
+    "slots": {
+      "am": 0,
+      "mid": 1,
+      "pm": 2
+    },
+    "slotTimes": {
+      "am": "07:00",
+      "mid": "13:00",
+      "pm": "19:00"
+    },
+    "tags": [
+      "#蓝V互关",
+      "#蓝朋友",
+      "#浇朋友",
+      "#浇个朋友",
+      "#交个朋友",
+      "#交朋友"
+    ],
+    "jitterMin": [
+      [
+        0,
+        15
+      ],
+      [
+        20,
+        35
+      ]
+    ],
     "note": "10-21 凌晨拍板：butcher/才女 每天 07:00/13:00/19:00 各 1 条互关帖（一天就这三次），分钟脚本内随机（butcher 槽起点+0~15min、才女 +20~35min 错开同刻指纹）；文案前一日 22:45 预制（根据前一天的换一批说法，防 X 同文重复墙），六标签程序附加（LLM 不碰标签）；帖帽由 executor.rollingCaps.post=60 覆盖"
   },
   "resident": {
@@ -602,5 +629,10 @@
       "cloudScheduler": true,
       "llmFallback": "ali"
     }
+  },
+  "freshData": {
+    "radarTtlMin": 60,
+    "profileTtlMin": 15,
+    "note": "10-21 拍板\"监控台与飞书报告同一体系\"：现采层 TTL——雷达 60min（HTTP 直取优先，监控页场景不起无头）、粉丝 15min（FxTwitter 即时）；互关占比仍半夜快照（本人视角翻列表成本高）"
   }
 }

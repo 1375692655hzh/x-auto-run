@@ -6,6 +6,7 @@ const path = require('path');
 
 const ROOT = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+const { ensureRadarFresh, ensureProfilesFresh } = require('./fresh-data');
 const STATE_DIR = path.join(ROOT, 'state');
 const X = Object.assign({ rollingCaps: { reply: 8, follow: 18, like: 15, unfollow: 5 } }, CFG.executor || {});
 const GRID_DAYS = 7, DATA_DAYS = 7; // 10-18 三方方案④：任务表 2→7 天格
@@ -460,7 +461,15 @@ function normalizeGrid(g) {
 // ── 页面 ─────────────────────────────────────────────────
 
 
+// 现采层后台刷新（10-21 拍板"与飞书报告同体系"）：TTL 过期才拉，请求不阻塞，下次轮询自然吃到新数据
+let freshInFlight = false;
+function kickFreshRefresh() {
+  if (freshInFlight) return;
+  freshInFlight = true;
+  Promise.allSettled([ensureRadarFresh(), ensureProfilesFresh()]).finally(() => { freshInFlight = false; });
+}
 const server = http.createServer((req, res) => {
+  kickFreshRefresh();
   if (req.url.startsWith('/api/data')) {
     try {
       const data = JSON.stringify(buildData());

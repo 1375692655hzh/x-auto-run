@@ -9,6 +9,7 @@ const ROOT = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
 const STATE_DIR = path.join(ROOT, 'state');
 const FS = JSON.parse(fs.readFileSync(path.join(ROOT, 'feishu.json'), 'utf8'));
+const { ensureRadarFresh, ensureProfilesFresh } = require('./fresh-data');
 const DRY = process.argv.includes('--dry');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const nowBj = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(5, 16).replace('T', ' ');
@@ -32,6 +33,9 @@ async function push(text) {
 }
 
 (async () => {
+  // ── 现采（10-21 拍板）：报告生成时现场拉雷达+粉丝（TTL 内自动跳过），慢数据只留互关占比走半夜快照 ──
+  const [rf, pf] = await Promise.allSettled([ensureRadarFresh(), ensureProfilesFresh()]);
+  const freshNote = [rf.status === 'fulfilled' && rf.value.fresh ? '雷达现采' : '雷达沿用快照', pf.status === 'fulfilled' && pf.value.fresh ? '粉丝现采' : '粉丝沿用快照'].join('·');
   // ── 数据聚合 ──
   const snap = readJson(path.join(STATE_DIR, 'health-snapshots', `${today()}.json`), null) || readJson(path.join(STATE_DIR, 'health-snapshots', `${new Date(Date.now() - 86400000).toISOString().slice(0, 10)}.json`), null);
   const accounts = (CFG.accounts || []).filter((a) => a.role !== 'observer');
@@ -39,7 +43,7 @@ async function push(text) {
   const cutMs = cut.getTime();
 
   const lines = [];
-  lines.push(`📊 X 运营项目运行报告（${nowBj()}）`);
+  lines.push(`📊 X 运营项目运行报告（${nowBj()}｜${freshNote}）`);
 
   for (const a of accounts) {
     const led = readJson(path.join(STATE_DIR, `ledger-${a.key}.json`), { actions: {}, meta: {} });
