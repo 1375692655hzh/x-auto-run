@@ -46,8 +46,22 @@ function ledgerRecord(type) {
 // 时段语气（拍板：预制的帖要有一点时间属性）
 const TONE = (h) => h < 8 ? '清晨开盘前：一天的开始，从容立计划' : h < 12 ? '上午盘中：盯盘中的即时感想' : h < 14 ? '午间：上半场小结的轻松口吻' : h < 18 ? '午后盘中：耐心和纪律' : h < 20 ? '傍晚：收盘前后的一天收束感' : h < 22 ? '晚间复盘：把判断摊开复盘' : '深夜：安静的自我整理';
 
-// ① 深滚抓 24h 参考池
-async function collectMaterial() {
+// ① 抓 24h 参考池：云端互关话题池 API 优先（10-21 拍板换源——grok bot 阿里云部署，带互动计数可按热度排序，零窗口）；
+//   失败回退本地浏览器深滚（保底链）
+const XM = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'x-mutual.json'), 'utf8')); } catch { return null; } })();
+async function collectMaterialApi() {
+  if (!XM || !XM.base || !XM.key) return null;
+  const r = await fetch(`${XM.base}/v1/posts?hours=${TC.refHours}&limit=80&exclude_rt=1`, { headers: { Authorization: 'Bearer ' + XM.key }, signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error('云端池 http ' + r.status);
+  const j = await r.json();
+  const posts = (j.posts || []).filter((p) => p && p.text && p.author && p.author.username && !p.is_retweet);
+  return posts
+    .sort((a, b) => (((b.metrics && (b.metrics.like_count + b.metrics.reply_count)) || 0) - ((a.metrics && (a.metrics.like_count + a.metrics.reply_count)) || 0)))
+    .map((p) => ({ author: p.author.username, text: String(p.text).replace(/\s+/g, ' ').trim().slice(0, 200), time: p.created_at, id: p.id, url: p.url, likes: (p.metrics && p.metrics.like_count) || 0, replies: (p.metrics && p.metrics.reply_count) || 0 }));
+}
+
+// ①-b 本地浏览器深滚（回退链，API 不可用才走）
+async function collectMaterialBrowser() {
   const j = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).then((r) => r.json());
   if (!j.success) throw new Error('开窗失败: ' + JSON.stringify(j).slice(0, 80));
   const browser = await puppeteer.connect({ browserWSEndpoint: j.data.ws, defaultViewport: null, protocolTimeout: 90000 });
@@ -79,6 +93,15 @@ async function collectMaterial() {
     await browser.disconnect();
     await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { });
   }
+}
+
+async function collectMaterial() {
+  try {
+    const m = await collectMaterialApi();
+    if (m && m.length) { LOG(`参考池=云端池 API：${m.length} 条（24h，按互动热度排序）`); audit({ action: 'material', source: 'api', count: m.length }); return m; }
+    LOG('云端池空/未配置，回退浏览器深滚');
+  } catch (e) { LOG('云端池失败(' + String(e.message).slice(0, 50) + ')，回退浏览器深滚'); audit({ action: 'material', source: 'api-fail', note: String(e.message).slice(0, 60) }); }
+  return collectMaterialBrowser();
 }
 
 // ② 生成一条（质量门不过重生一次，仍不过跳过该槽）
