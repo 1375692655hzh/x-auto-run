@@ -15,6 +15,7 @@ const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
 const SRC = JSON.parse(fs.readFileSync(path.join(ROOT, 'content-source.json'), 'utf8'));
 const STATE_DIR = path.join(ROOT, 'state');
 const INBOX = path.join(ROOT, 'posts-inbox');
+const PULL_ONLY = ((process.argv.find((a) => a.startsWith('--account=')) || '').slice('--account='.length) || '').trim(); // 只拉指定号（常驻进程用，防给窗号误滴
 const DRY = process.argv.includes('--dry');
 // 北京时间口径（服务器 date 参数按 sent_at 北京落盘日期过滤；slot 日期≠落盘日期，实测坑）
 const bjDate = (offDays = 0) => new Date(Date.now() + 8 * 3600000 + offDays * 86400000).toISOString().slice(0, 10);

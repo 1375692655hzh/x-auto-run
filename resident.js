@@ -344,7 +344,7 @@ if (WATCHDOG) {
   // ── 云端内容（照常：槽点拉取滴灌，并入发布队列） ──
   async function cloudSlot(slot) {
     try {
-      spawnSync(process.execPath, [path.join(ROOT, 'content-pull.js')], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, NODE_EXTRA_CA_CERTS: path.join(ROOT, 'x-daily-cert.pem') } });
+      spawnSync(process.execPath, [path.join(ROOT, 'content-pull.js'), '--account=' + ACCOUNT], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, NODE_EXTRA_CA_CERTS: path.join(ROOT, 'x-daily-cert.pem') } });
       let delayMin = 1;
       for (const f of fs.existsSync(INBOX) ? fs.readdirSync(INBOX) : []) {
         if (!f.startsWith(`pull-${ACCOUNT}-`) || !f.endsWith('.json')) continue;
