@@ -251,6 +251,7 @@ if (WATCHDOG) {
   // 10-20 拍板 24 小时制：进程全天在岗（至当日 23:59 自灭，00:05 由计划任务接替）；
   // 互动（巡逻/光速回复/互关帖）仅 interactionHours[8,22] 内；云帖全天——白天每小时≤2、夜里(22~8)1条/小时
   const IH = RC.interactionHours || [8, 22];
+  const topicOff = !!(RC.topicPosts && RC.topicPosts.enabled); // 10-20：互关帖改预制定时发布（topic-posts.js），常驻页3功能下线
   const userReplyCount = (author) => { st.userReplies = st.userReplies || {}; return (st.userReplies[(author || '').toLowerCase()] || 0); };
   const userReplyIncr = (author) => { st.userReplies = st.userReplies || {}; const a = (author || '').toLowerCase(); st.userReplies[a] = (st.userReplies[a] || 0) + 1; saveSt(st); };
   const userCapOk = (author) => userReplyCount(author) < (RC.perUserReplyCapDay != null ? RC.perUserReplyCapDay : 3);
@@ -430,9 +431,9 @@ if (WATCHDOG) {
           else audit({ action: 'inboxReply', target: q.author, status: 'failed', note: rr.note });
           if (await checkAbort(pageReply, '光速回复')) break;
         } else if (q.kind === 'cloud') {
-          if (usedToday('post') >= RC.postCapDay) { audit({ action: 'cloudPost', status: 'skipped', note: '帖帽满' }); continue; }
+          if (usedToday('postCloud') >= RC.postCapDay) { audit({ action: 'cloudPost', status: 'skipped', note: '云帖帽满' }); continue; }
           const rr = await retryTransient(() => postOnPage(pagePost, q.text)).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
-          if (rr.ok || rr.unknown) { ledgerRecord('post'); audit({ action: 'cloudPost', status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40), note: rr.note }); }
+          if (rr.ok || rr.unknown) { ledgerRecord('post'); ledgerRecord('postCloud'); audit({ action: 'cloudPost', status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40), note: rr.note }); }
           else audit({ action: 'cloudPost', status: 'failed', note: rr.note });
           if (await checkAbort(pagePost, '云帖')) break;
         }
@@ -440,7 +441,7 @@ if (WATCHDOG) {
       // 互动三路守互动窗（夜里只发帖不互动）；定时器先推进再执行（防异常/长耗时后立即重跑饿死队列）
       if (interactOk() && Date.now() >= nextReplyPoll) { nextReplyPoll = Date.now() + RC.replyPollMin * 60000; await pollNotifications(); if (aborted) break; }
       if (interactOk() && Date.now() >= nextPatrol) { nextPatrol = Date.now() + rand(RC.patrolGapMin[0], RC.patrolGapMin[1]) * 60000; await patrol(); if (aborted) break; }
-      if (interactOk() && Date.now() >= nextPost) { nextPost = Date.now() + rand(RC.postGapMin[0], RC.postGapMin[1]) * 60000; await postHourly(); if (aborted) break; }
+      if (!topicOff && interactOk() && Date.now() >= nextPost) { nextPost = Date.now() + rand(RC.postGapMin[0], RC.postGapMin[1]) * 60000; await postHourly(); if (aborted) break; }
       // 云帖改每小时跟随（10-20 拍板，上游每小时:40 出文）：每小时的 :50 拉取，当小时额度=白天2/夜里1
       if (!DRY && now.getMinutes() >= (RC.cloudPullMinute != null ? RC.cloudPullMinute : 50) && st.lastCloudHour !== hourKey) {
         st.lastCloudHour = hourKey; saveSt(st); await cloudSlot(hourKey); if (aborted) break;

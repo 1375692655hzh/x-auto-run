@@ -422,7 +422,7 @@ function executeAction(page, entry) {
 
   const hour = new Date().getHours();
   const inWindow = hour >= L.activeHours[0] && hour < L.activeHours[1];
-  const IGNORE_HOURS = argv.includes('--ignore-hours'); // 仅限用户点名的手动测试/补发使用，定时任务严禁携带
+  const IGNORE_HOURS = argv.includes('--ignore-hours') || !!ENTRY_ID; // ENTRY_ID=到点定时拉起（计划内已审动作，10-20 互关帖预制 06:00 起会跨守窗）
   if (!DRY && !SIMULATE && !inWindow && !IGNORE_HOURS) { console.error(`不在执行窗 ${L.activeHours[0]}:00-${L.activeHours[1]}:00，退出（模拟/DRY 不受限；手动测试可加 --ignore-hours）`); process.exit(1); }
   if (IGNORE_HOURS && !DRY && !SIMULATE) console.warn('⚠ --ignore-hours：本次为窗外手动执行（应有用户明确指令）');
 

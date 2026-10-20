@@ -203,9 +203,9 @@
       "follow": 100,
       "like": 20,
       "unfollow": 0,
-      "post": 20
+      "post": 60
     },
-    "rollingCapsNote": "10-19 深夜拍板同步：回关无任务上限后，关注帽 50→100（wcixot 互关 40 全带 followFirst + 回关的余量；官方 400/天硬顶的四分之一，引擎安全网非任务量）；回复帽 40→60（wcixot 互关 40+串门 20 的余量）",
+    "rollingCapsNote": "10-19 深夜拍板同步：回关无任务上限后，关注帽 50→100（wcixot 互关 40 全带 followFirst + 回关的余量；官方 400/天硬顶的四分之一，引擎安全网非任务量）；回复帽 40→60（wcixot 互关 40+串门 20 的余量）；post 20→60（10-20：互关帖10+云帖≤50 合计60 的双帽结构下，引擎帽只做保险丝）",
     "queueTtlMinutes": 300,
     "actionGapGaussMs": [
       90000,
@@ -570,7 +570,25 @@
       "cloudDayHourMax": 2,
       "cloudNightHourMax": 1,
       "perUserReplyCapDay": 3,
-      "replyMaxLen": 20
+      "replyMaxLen": 20,
+      "topicPosts": {
+        "enabled": true,
+        "genAt": "05:50",
+        "points": [
+          6,
+          8,
+          10,
+          12,
+          14,
+          16,
+          18,
+          20,
+          22,
+          24
+        ],
+        "jitterMin": 45,
+        "note": "10-20 拍板：全程预制——05:50 深滚 #蓝V互关 抓 24h 参考池，mimo 成批生成 10 条（分时段语气），整点±0~45min 定时发布；替代常驻页3"
+      }
     }
   }
 }
