@@ -313,7 +313,7 @@ if (WATCHDOG) {
         if (DRY) { LOG(`[DRY] 应回复 @${it.author} 的通知 ${it.href}`); continue; }
         const postUrl = 'https://x.com' + it.href;
         const statusId = (it.href.match(/status\/(\d+)/) || [])[1];
-        const r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是一条对方发给我们（回复或提及）的消息，作为帖子主人礼貌、具体地回应对方；回复控制在 20 字以内，像随手回的真人，越短越好。', history: [], channel: RC.llmChannel, maxLen: RC.replyMaxLen || 20 }).catch(() => null);
+        const r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是一条对方发给我们（回复或提及）的消息，作为帖子主人礼貌、具体地回应对方；回复控制在 20 字以内，像随手回的真人，越短越好。', history: [], channel: RC.llmChannel, maxLen: RC.replyMaxLen || 20, fallbackProvider: RC.llmFallback }).catch(() => null);
         const qc = r && r.text ? quality.check(r.text, {}) : null;
         if (qc && qc.ok) {
           sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: qc.cleaned, sendAt: Date.now() + rand(RC.replyDelayMin[0], RC.replyDelayMin[1]) * 60000 });
@@ -345,7 +345,7 @@ if (WATCHDOG) {
       for (const p of take) {
         if (aborted) break; // 回复总量帽已拆（10-20 拍板'回复不需要帽子'）；单用户上限见 userReplyCount
         if (!userCapOk(p.author)) { audit({ action: 'patrolSkip', target: p.author, note: '单用户回复上限' }); continue; }
-        const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注、常来往（不要声称已关注）。', history: [], channel: RC.llmChannel }).catch(() => null);
+        const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注、常来往（不要声称已关注）。', history: [], channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
         const qc = r && r.text ? quality.check(r.text, {}) : null;
         if (!(qc && qc.ok)) { audit({ action: 'patrolGen', target: p.author, note: `生成未过门(${qc ? qc.reason : 'LLM失败'})，跳过` }); continue; }
         if (DRY) { LOG(`[DRY] 应评论 @${p.author}: ${qc.cleaned.slice(0, 30)}…`); continue; }
