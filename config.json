@@ -556,9 +556,8 @@
       ],
       "llmChannel": "mimo",
       "postCapDay": 50,
-      "replyCapDay": 60,
       "followCapDay": 100,
-      "note": "10-20 终版：24小时制（23:59 自灭 00:05 接替）；互动窗 8-22（巡逻/光速回复/互关帖）；云帖全天每小时:50 拉（上游每小时:40 出文），白天≤2条/时 夜里(22-8)1条/时，余量写回下小时消费；同作者每轮≤1；LLM=mimo；帖帽50",
+      "note": "10-20 终版：24小时制（23:59 自灭 00:05 接替）；互动窗 8-22（巡逻/光速回复/互关帖）；云帖全天每小时:50 拉（上游每小时:40 出文），白天≤2条/时 夜里(22-8)1条/时，余量写回下小时消费；同作者每轮≤1；回复无总量帽（10-20 拍板），单用户≤3条/天（光速+巡逻合并计）；LLM=mimo；帖帽50",
       "patrolPostGapSec": [
         25,
         60
@@ -569,7 +568,8 @@
       ],
       "cloudPullMinute": 50,
       "cloudDayHourMax": 2,
-      "cloudNightHourMax": 1
+      "cloudNightHourMax": 1,
+      "perUserReplyCapDay": 3
     }
   }
 }

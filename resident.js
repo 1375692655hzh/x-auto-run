@@ -248,6 +248,10 @@ if (WATCHDOG) {
   // 10-20 拍板 24 小时制：进程全天在岗（至当日 23:59 自灭，00:05 由计划任务接替）；
   // 互动（巡逻/光速回复/互关帖）仅 interactionHours[8,22] 内；云帖全天——白天每小时≤2、夜里(22~8)1条/小时
   const IH = RC.interactionHours || [8, 22];
+  const userReplyCount = (author) => { st.userReplies = st.userReplies || {}; return (st.userReplies[(author || '').toLowerCase()] || 0); };
+  const userReplyIncr = (author) => { st.userReplies = st.userReplies || {}; const a = (author || '').toLowerCase(); st.userReplies[a] = (st.userReplies[a] || 0) + 1; saveSt(st); };
+  const userCapOk = (author) => userReplyCount(author) < (RC.perUserReplyCapDay != null ? RC.perUserReplyCapDay : 3);
+  if (st.day !== today()) { st.userReplies = {}; } // 跨日重置
   const interactOk = () => { const h = new Date().getHours(); return h >= IH[0] && h < IH[1]; };
   const cloudQuota = () => interactOk() ? (RC.cloudDayHourMax != null ? RC.cloudDayHourMax : 2) : (RC.cloudNightHourMax != null ? RC.cloudNightHourMax : 1);
   let nextReplyPoll = Date.now() + 60 * 1000;
@@ -294,6 +298,7 @@ if (WATCHDOG) {
         const key = it.href + '|' + it.author.toLowerCase();
         if (st.seenNotifs[key]) continue;
         st.seenNotifs[key] = nowIso();
+        if (!userCapOk(it.author)) { audit({ action: 'inboxSkip', target: it.author, note: '单用户回复上限' }); continue; }
         if (DRY) { LOG(`[DRY] 应回复 @${it.author} 的通知 ${it.href}`); continue; }
         const postUrl = 'https://x.com' + it.href;
         const statusId = (it.href.match(/status\/(\d+)/) || [])[1];
@@ -324,7 +329,8 @@ if (WATCHDOG) {
       const take = fresh.filter((p) => { const a = (p.author || '').toLowerCase(); if (seenAuth.has(a)) return false; seenAuth.add(a); return true; }).slice(0, RC.patrolPerRound);
       LOG(`页2：#${RC.patrolTopic} 本轮新帖 ${fresh.length} 条，取 ${take.length} 条评论`);
       for (const p of take) {
-        if (aborted || usedToday('reply') >= RC.replyCapDay) break;
+        if (aborted) break; // 回复总量帽已拆（10-20 拍板'回复不需要帽子'）；单用户上限见 userReplyCount
+        if (!userCapOk(p.author)) { audit({ action: 'patrolSkip', target: p.author, note: '单用户回复上限' }); continue; }
         const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注、常来往（不要声称已关注）。', history: [], channel: RC.llmChannel }).catch(() => null);
         const qc = r && r.text ? quality.check(r.text, {}) : null;
         if (!(qc && qc.ok)) { audit({ action: 'patrolGen', target: p.author, note: `生成未过门(${qc ? qc.reason : 'LLM失败'})，跳过` }); continue; }
@@ -332,7 +338,7 @@ if (WATCHDOG) {
         // 动作隔离（10-20 用户建议）：每个动作独立临时页+用完即关，与搜索页状态彻底解耦；瞬态错误重试一次
         const postUrl = 'https://x.com' + (p.link || ('/i/web/status/' + p.id));
         let rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned)));
-        if (rr.ok || rr.unknown) { ledgerRecord('reply'); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
+        if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(p.author); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
         else audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: 'failed', note: rr.note });
         if (rr.ok && usedToday('follow') < RC.followCapDay) {
           const fo = await withTempPage(browser, (pg) => retryTransient(() => followOnPage(pg, p.author)));
@@ -414,7 +420,7 @@ if (WATCHDOG) {
         sendQueue.splice(i, 1);
         if (q.kind === 'replyInbox') {
           const rr = await replyOnPage(pageReply, q.statusId, q.postUrl, q.text);
-          if (rr.ok || rr.unknown) { ledgerRecord('reply'); audit({ action: 'inboxReply', target: q.author, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
+          if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(q.author); audit({ action: 'inboxReply', target: q.author, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
           else audit({ action: 'inboxReply', target: q.author, status: 'failed', note: rr.note });
           if (await checkAbort(pageReply, '光速回复')) break;
         } else if (q.kind === 'cloud') {
