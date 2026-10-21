@@ -79,7 +79,7 @@ const TASK_ROWS = [
   { id: 'residentFullwin', t: '08:00-23:00 常驻', cat: '主动互动', name: 'fullwin 常驻运营（一窗三页）', unit: '次', status: 'on', set: '页1 光速回复（5min轮询·延迟1-10min）· 页2 #蓝V互关巡逻（8-15min/轮·≤4条·无日帽）· 页3 互关帖（1h±0-25min·六tag）· 云端内容照常（09:35/12:35/19:35 并入）', setNum: null, sug: '帖帽35/回复帽60/关注帽100；LLM=mimo；熔断/PAUSE/看门狗全接', desc: '10-20 拍板常驻形态：替代 fullwin 三个运营窗；看门狗每小时查心跳自动重拉；自家矩阵号通知不自动回（用户手动管）' },
   { id: 'maintain', t: '12:35/19:35 窗内', cat: '主动互动', name: '权重维护互动（统一固定窗）', unit: '次', status: 'on', set: '≤1 帖/目标/窗 · ≤3 次/号/天（v1.1 拍板）', setNum: null, sug: '维护计入当日点赞/回复总帽', desc: '10-20 终版：四号互维护（每号维护自身以外四号含 owen）；概率管量=点赞0.8/回复1/3独立掷骰；保险丝=3N（N=维护者数）；同帖全圈≤2号；前置停留+40%顺访主页（11x+4x不可见信号）；掷骰与质量门失败均降级不重掷' },
   { id: 'verifyReply', t: '已下线', cat: '系统运维', name: '回复可见性抽查（已下线）', unit: '次', status: 'off', set: '—', setNum: null, sug: '—', desc: '10-19 拍板下线：走 FxTwitter 路径不稳定易误判，回复可见性以雷达四维（ghost/deboost 两维即回复可见性检测）为准，每晚 03:20 半夜数据窗' },
-  { id: 'passive', t: '随通知', cat: '被动回复', name: '回复他人的回复', unit: '', status: 'pending', set: '不限（你拍板）', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '别人在我们帖下的回复→回应；评论模块待接入' },
+  { id: 'passive', t: '每30分钟', cat: '被动回复', name: '回复他人的评论（被动回复）', unit: '条', status: 'on', set: '不限量（你拍板）· 单用户≤3条/天 · 每轮≤10条', setNum: null, sug: '计入回复日总量分档：合计≤5-10/天=低风险（XActions；官方200/天硬顶）', desc: '10-21 拍板上线：inbox-reply.js 每 30 分钟轮询提及页（07:00-22:00）→ LLM 生成→回复对方评论；自家矩阵号不回；只回复不关注（回关归条件回关）；schtasks Xops被动回复-butcher/才女' },
   { id: 'report', t: '22:05', cat: '系统运维', name: '每日日报', unit: '份', status: 'on', set: '1 份', setNum: 1, sug: '1/天（复盘频率；XActions 建议每日审计）', desc: '计划任务 Xops日报 自动生成' },
 ];
 
@@ -116,6 +116,7 @@ function aggregateLogs() {
       else if (j.task === 'executor' && j.kind === 'maintain' && j.action === 'execute' && (j.status === 'done' || j.status === 'unknown')) {
         row = 'maintain'; item = `${j.target ? (String(j.target).startsWith('@') ? j.target : '@' + j.target) : j.statusId} ${j.type === 'reply' ? '维护回复' : '维护点赞'}`;
       }
+      else if (j.task === 'inboxReply' && j.action === 'execute' && (j.status === 'done' || j.status === 'unknown')) { row = 'passive'; item = '回评论 @' + (j.target||'') + '「' + String(j.text||'').slice(0,16) + '」' + (j.status === 'unknown' ? '(不明)' : '✓'); }
       else if (j.task === 'mutualPost' && j.action === 'post' && (j.status === 'done' || j.status === 'unknown')) { row = 'mutualPost'; item = `互关帖 ${j.slot || ''}槽「${String(j.text || '').slice(0, 16)}」${j.status === 'unknown' ? '(不明)' : '✓'}`; }
       else if (j.task === 'executor' && j.action === 'execute' && (j.status === 'done' || j.status === 'unknown')) {
         const w = (String(j.id).match(/-(am|mid|pm|eve|p1|p2|p3)-/) || [])[1] || winByHour;

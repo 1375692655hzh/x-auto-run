@@ -19,7 +19,7 @@ const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
 const logFile = path.join(STATE_DIR, `log-${DATE.slice(0, 7)}.jsonl`);
 const stats = {}; // key -> {community, followback, visit, post, maintain, follow, unknown:[], failed:[], skipped:{}}
 function bucket(key) {
-  if (!stats[key]) stats[key] = { community: 0, followback: 0, visit: 0, post: 0, maintain: 0, follow: 0, unknown: [], failed: [], postTimes: [] };
+  if (!stats[key]) stats[key] = { community: 0, followback: 0, visit: 0, post: 0, maintain: 0, follow: 0, inbox: 0, unknown: [], failed: [], postTimes: [] };
   return stats[key];
 }
 try {
@@ -34,7 +34,8 @@ try {
     if (bjDay !== DATE) continue;
     if (j.task !== 'executor' || j.action !== 'execute') {
       // 互关帖（10-21 拍板，mutual-post.js 独立脚本）：按同口径计入原创发帖
-      if (!(j.task === 'mutualPost' && j.action === 'post')) continue;
+      // 被动回复（10-21 拍板，inbox-reply.js 独立脚本）：按同口径单列计数
+      if (!((j.task === 'mutualPost' && j.action === 'post') || (j.task === 'inboxReply' && j.action === 'execute'))) continue;
     }
     const b = bucket(j.account);
     if (j.status === 'unknown') { b.unknown.push(`${(j.id || '').slice(11)} ${j.type}${j.note ? '：' + String(j.note).slice(0, 40) : ''}`); continue; }
@@ -42,6 +43,7 @@ try {
     if (j.status !== 'done') continue;
     // kind 优先于 type 判分支（review 抓出：followback-reply 是 type=follow，排在 kind 前会被误计入关注帖主）
     if (j.kind === 'maintain') b.maintain += 1;
+    else if (j.kind === 'inbox') b.inbox += 1; // 被动回复（10-21 拍板接入）
     else if (j.type === 'post') { b.post += 1; b.postTimes.push(j.at); }
     else if (j.kind === 'followback-reply' || j.kind === 'followback') b.followback += 1;
     else if (j.type === 'follow') b.follow += 1;
@@ -70,7 +72,7 @@ const sections = runAccounts.map((a) => {
   const sumOwn = (kind) => Object.values(own[kind] || {}).reduce((s, x) => s + (x || 0), 0);
   const lines = [];
   // 分母只认每号自己拍板的量（review 抓出：全局回退会让 fullwin 显示 0/25、maccostin 显示 0/10 串门）
-  lines.push(`- 完成量：互关评论 ${b.community}${own.community ? '/' + sumOwn('community') : '（未配置）'} · 条件回关 ${b.followback}（无任务上限） · 串门 ${b.visit}${own.visit ? '/' + sumOwn('visit') : '（未配置）'} · 原创发帖 ${b.post}（区间 8~18）· 权重维护 ${b.maintain}/≤3 · 关注帖主 ${b.follow}`);
+  lines.push(`- 完成量：互关评论 ${b.community}${own.community ? '/' + sumOwn('community') : '（未配置）'} · 条件回关 ${b.followback}（无任务上限） · 串门 ${b.visit}${own.visit ? '/' + sumOwn('visit') : '（未配置）'} · 原创发帖 ${b.post}（区间 8~18）· 权重维护 ${b.maintain}/≤3 · 关注帖主 ${b.follow} · 被动回复 ${b.inbox}`);
   // 粉丝
   const e = snap && snap.accounts && snap.accounts[a.key];
   const yE = ySnap && ySnap.accounts && ySnap.accounts[a.key];
