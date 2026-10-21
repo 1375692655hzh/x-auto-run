@@ -45,28 +45,11 @@ const quota = () => { const h = new Date().getHours(); const [d, e] = [8, 22]; r
   const take = Math.min(quota(), room);
   let queued = 0;
   const entries = [];
-  for (const f of fs.existsSync(INBOX) ? fs.readdirSync(INBOX).filter((f) => f.startsWith(`pull-${ACCOUNT}-`) && f.endsWith('.json')) : []) {
-    const items = readJson(path.join(INBOX, f), []);
-    const roomLeft = Math.max(0, take - queued);
-    const fileItems = items.slice(0, roomLeft);
-    for (const it of fileItems) {
-      let t = it.text;
-      // 入队长度门（10-21 根因修复：上游偶发产出 >280 加权长文，发布按钮被禁用必败）
-      if (quality.weightedLen(t) > 270) {
-        const fx = await ensurePostLen(t, { channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
-        if (fx && fx.text) { audit({ action: 'postLenFix', note: `入队压缩 ${fx.before}→${fx.after} via ${fx.via}` }); t = fx.text; }
-      }
-      entries.push({ text: t, quote: it.quote, quoteUrl: it.quoteUrl }); queued++;
-    }
-    const rest = items.slice(fileItems.length); // 余量写回，下一小时继续
-    if (rest.length) writeJson(path.join(INBOX, f), rest);
-    else { try { fs.renameSync(path.join(INBOX, f), path.join(INBOX, f + '.done-' + Date.now())); } catch { } }
-    if (queued >= take) break;
-  }
 
-  // ②b 补跑清扫（10-21 事故修复：云帖失败无补跑=永久丢量，违背交付必达）：
+  // ②a 补跑清扫（10-21 事故修复：云帖失败无补跑=永久丢量，违背交付必达）：
   // 扫近 2 日云帖队列里 status=failed 且未补跑过的条目，重压缩（超限是真因）后并入本小时额度消化。
-  // 放在"投递箱空"退出判断之前——空箱小时也要补跑（交付优先于新内容）
+  // 必须排在投递箱取件【之前】——先补欠账再上新内容（09:50 实跑教训：排后面会被新内容占满额度挨饿）；
+  // 空箱小时也照跑（交付优先于新内容）
   try {
     for (let dd = 1; dd >= 0; dd--) {
       const d = new Date(Date.now() - dd * 86400000);
@@ -96,6 +79,25 @@ const quota = () => { const h = new Date().getHours(); const [d, e] = [8, 22]; r
       if (entries.length >= take) break;
     }
   } catch (e) { audit({ action: 'cloudSweep', status: 'error', note: String(e.message || e).slice(0, 80) }); }
+
+  for (const f of fs.existsSync(INBOX) ? fs.readdirSync(INBOX).filter((f) => f.startsWith(`pull-${ACCOUNT}-`) && f.endsWith('.json')) : []) {
+    const items = readJson(path.join(INBOX, f), []);
+    const roomLeft = Math.max(0, take - entries.length);
+    const fileItems = items.slice(0, roomLeft);
+    for (const it of fileItems) {
+      let t = it.text;
+      // 入队长度门（10-21 根因修复：上游偶发产出 >280 加权长文，发布按钮被禁用必败）
+      if (quality.weightedLen(t) > 270) {
+        const fx = await ensurePostLen(t, { channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
+        if (fx && fx.text) { audit({ action: 'postLenFix', note: `入队压缩 ${fx.before}→${fx.after} via ${fx.via}` }); t = fx.text; }
+      }
+      entries.push({ text: t, quote: it.quote, quoteUrl: it.quoteUrl }); queued++;
+    }
+    const rest = items.slice(fileItems.length); // 余量写回，下一小时继续
+    if (rest.length) writeJson(path.join(INBOX, f), rest);
+    else { try { fs.renameSync(path.join(INBOX, f), path.join(INBOX, f + '.done-' + Date.now())); } catch { } }
+    if (entries.length >= take) break;
+  }
 
   if (!entries.length) { audit({ action: 'cloudPost', status: 'none', note: '投递箱空（上游无新内容或缓存未滴）' }); process.exit(0); }
   LOG(`本小时额度 ${take}，取到 ${entries.length} 条${entries.some((e) => e.requeueOf) ? `（含补跑 ${entries.filter((e) => e.requeueOf).length} 条）` : ''}`);
