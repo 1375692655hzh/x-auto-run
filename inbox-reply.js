@@ -212,10 +212,29 @@ async function replyToComment(page, postUrl, statusId, text) {
         const uc = st.perUser.counts[it.author.toLowerCase()] || 0;
         if (uc >= PER_USER_DAY) { st.seenNotifs[key] = { at: nowIso(), status: 'userCap' }; stats.skippedCap++; log({ action: 'skip', target: it.author, note: '单用户日帽' }); continue; }
         // LLM 生成（人设 + 入站语境 brief；40 字内随手回）
-        const brief = '对方在我们发的帖子下评论（互关帖或盘面帖）。作为楼主真诚、具体地回应一句；对方求互关/串门的自然欢迎常来往；不要声称已关注对方（回关由别的机制做）；不要话题标签不要@任何人；控制在 40 字以内，像随手回的真人。';
-        const r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: [], maxLen: 40 }).catch((e) => { console.log('LLM 失败: ' + String(e.message).slice(0, 80)); return null; });
-        const qc = r && r.text ? quality.check(r.text, {}) : null;
-        if (!(qc && qc.ok)) { log({ action: 'genFail', target: it.author, note: qc ? qc.reason : 'LLM失败' }); st.seenNotifs[key] = { at: nowIso(), status: 'genFail' }; saveSt(st); continue; }
+        const brief = '对方在我们发的帖子下评论（互关帖或盘面帖）。作为楼主真诚、具体地回应一句；对方求互关/串门的自然欢迎常来往；不要声称已关注对方（回关由别的机制做）；不要话题标签不要@任何人；控制在 40 字以内，像随手回的真人，结尾要有标点。';
+        // 交付必达（10-21）：截断门在 ≤40 字随手回场景误杀率高（完整短句只是没句号）——
+        // ①补句号重验（仅当文本不像真截断：不以连接符/半个英文词结尾）②再失败换语气重生成一轮 ③仍败记 genFail 下轮再试一次
+        const tryGen = async () => {
+          const r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: [], maxLen: 40 }).catch((e) => { console.log('LLM 失败: ' + String(e.message).slice(0, 80)); return null; });
+          if (!r || !r.text) return null;
+          const qc = quality.check(r.text, {});
+          if (!qc.ok && /疑似截断/.test(qc.reason || '')) {
+            const t = qc.cleaned.trim();
+            if (!/[，,、；;：:…—\-~～(（]$/.test(t) && !/[a-zA-Z]$/.test(t)) { // 完整短句只是缺句号 → 补句号重验
+              const qc2 = quality.check(t + '。', {});
+              if (qc2.ok) return qc2;
+            }
+          }
+          return qc.ok ? qc : null;
+        };
+        let qc = await tryGen();
+        if (!qc) qc = await tryGen();
+        if (!qc) {
+          if (DRY) { console.log(`[DRY] 两轮生成未过门(@${it.author})，跳过`); continue; } // DRY 不写台账不标记
+          log({ action: 'genFail', target: it.author, note: '两轮生成未过门' });
+          st.seenNotifs[key] = { at: nowIso(), status: 'genFail' }; saveSt(st); continue;
+        }
         if (DRY) { console.log(`[DRY] 应回复 @${it.author}（${statusId.slice(-6)}）: ${qc.cleaned}`); continue; } // DRY 不写 seenNotifs（10-21 实战：干跑标记曾把 22 条积压标成"已读"险致永不回）
         await sleep(rand(500, 3000)); // 0.5-3s 小延迟（轮询本身已有 0-30min 自然延迟）
         let rr = await replyToComment(page, 'https://x.com' + it.href, statusId, qc.cleaned).catch((e) => ({ ok: false, note: e.message }));
