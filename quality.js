@@ -68,19 +68,23 @@ const EMOJI_RE = /\p{Extended_Pictographic}/gu;
  *   3) 不以通用套话开场（中英）
  *   4) emoji ≤2
  *   5) 与近 7 天已发文案的相似度 < 0.55
+ * casual=true（10-21 双阈值配套）：短口语回复场景——豁免”套话开场”与”结尾标点”两条
+ *   （互关社区”来了来了/大佬好”是合法社交应答，无句号是口语特征不是截断）；长度/emoji/相似度照常。
  */
-function check(text, { history = [], maxLen = 280, minLen = 8, simThreshold = 0.55 } = {}) {
+function check(text, { history = [], maxLen = 280, minLen = 8, simThreshold = 0.55, casual = false } = {}) {
   const { cleaned } = clean(text);
   if (!text || !text.trim()) return { ok: false, reason: '空文案', weightedLen: 0, cleaned };
   if (!cleaned) return { ok: false, reason: '清洗后为空（只剩链接/标签？）', weightedLen: 0, cleaned };
   const len = weightedLen(cleaned);
   if (len > maxLen) return { ok: false, reason: `超长(${len}>${maxLen})`, weightedLen: len, cleaned };
   if (len < minLen) return { ok: false, reason: `过短(${len}<${minLen})，无信息量`, weightedLen: len, cleaned };
-  const lower = cleaned.toLowerCase().replace(/^[^a-z\u4e00-\u9fff]+/i, '');
-  const hit = GENERIC_OPENERS.find((o) => lower.startsWith(o.toLowerCase()));
-  if (hit) return { ok: false, reason: `通用套话开场："${hit}"`, weightedLen: len, cleaned };
-  if (!/[。！？…～）)”"”』」]|\p{Extended_Pictographic}$/u.test(cleaned)) {
-    return { ok: false, reason: '疑似截断（结尾无标点）', weightedLen: len, cleaned };
+  if (!casual) {
+    const lower = cleaned.toLowerCase().replace(/^[^a-z\u4e00-\u9fff]+/i, '');
+    const hit = GENERIC_OPENERS.find((o) => lower.startsWith(o.toLowerCase()));
+    if (hit) return { ok: false, reason: `通用套话开场：”${hit}”`, weightedLen: len, cleaned };
+    if (!/[。！？…～））”””』」]|\p{Extended_Pictographic}$/u.test(cleaned)) {
+      return { ok: false, reason: '疑似截断（结尾无标点）', weightedLen: len, cleaned };
+    }
   }
   const emojis = (cleaned.match(EMOJI_RE) || []).length;
   if (emojis > 2) return { ok: false, reason: `emoji过多(${emojis})`, weightedLen: len, cleaned };

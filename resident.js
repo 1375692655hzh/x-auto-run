@@ -274,7 +274,8 @@ if (WATCHDOG) {
 
   const st = loadSt();
   st.pid = process.pid; // 供 executor 守卫探活（resident-guard.js）与单实例判断
-  if (st.day !== today()) { st.seenNotifs = {}; st.seenPosts = {}; st.lastCloudSlot = {}; st.day = today(); }
+  // 跨日重置（10-21 修复 Codex 抓出的死代码：st.day 先设后查致 userReplies 永不重置）
+  if (st.day !== today()) { st.seenNotifs = {}; st.seenPosts = {}; st.lastCloudSlot = {}; st.userReplies = {}; st.day = today(); saveSt(st); }
   let aborted = false;
   const sendQueue = []; // {kind, statusId, postUrl, author, text, sendAt}
   // 10-20 拍板 24 小时制：进程全天在岗（至当日 23:59 自灭，00:05 由计划任务接替）；
@@ -284,9 +285,17 @@ if (WATCHDOG) {
   const userReplyCount = (author) => { st.userReplies = st.userReplies || {}; return (st.userReplies[(author || '').toLowerCase()] || 0); };
   const userReplyIncr = (author) => { st.userReplies = st.userReplies || {}; const a = (author || '').toLowerCase(); st.userReplies[a] = (st.userReplies[a] || 0) + 1; saveSt(st); };
   const userCapOk = (author) => userReplyCount(author) < (RC.perUserReplyCapDay != null ? RC.perUserReplyCapDay : 3);
-  if (st.day !== today()) { st.userReplies = {}; } // 跨日重置
+  // 防复读历史（10-21 修复：三处 history 恒空致相似度防线断线；环形缓冲 100 条，范本 planner.js）
+  const pushReplyHistory = (text) => { st.replyHistory = st.replyHistory || []; st.replyHistory.push(String(text).slice(0, 120)); if (st.replyHistory.length > 100) st.replyHistory = st.replyHistory.slice(-100); saveSt(st); };
+  const recentHistory = () => (st.replyHistory || []).slice(-8);
   const interactOk = () => { const h = new Date().getHours(); return h >= IH[0] && h < IH[1]; };
   const cloudQuota = () => interactOk() ? (RC.cloudDayHourMax != null ? RC.cloudDayHourMax : 2) : (RC.cloudNightHourMax != null ? RC.cloudNightHourMax : 1);
+  // 10-21 bug5：重启恢复持久化待发（只恢复 30 分钟内的，过期的丢弃留审计）
+  for (const x of (st.pendingInbox || [])) {
+    if (Date.parse(x.sendAt) > Date.now() - 30 * 60000) sendQueue.push({ kind: 'replyInbox', ...x });
+    else audit({ action: 'inboxDrop', target: x.author, note: '重启恢复时已过期>30min，丢弃' });
+  }
+  if ((st.pendingInbox || []).length) { st.pendingInbox = []; saveSt(st); }
   let nextReplyPoll = Date.now() + 60 * 1000;
   let nextPatrol = Date.now() + rand(60, 180) * 1000;
   let nextPost = Date.now() + rand(3, 10) * 60000; // 启动后先热身，不立即发
@@ -336,9 +345,9 @@ if (WATCHDOG) {
         if (OWN.has(it.author.toLowerCase())) continue; // 自家矩阵号不自动回（用户手动管，防互吹自动化）
         const key = it.href + '|' + it.author.toLowerCase();
         if (st.seenNotifs[key]) continue;
-        st.seenNotifs[key] = nowIso();
-        if (!userCapOk(it.author)) { audit({ action: 'inboxSkip', target: it.author, note: '单用户回复上限' }); continue; }
-        if (DRY) { LOG(`[DRY] 应回复 @${it.author} 的通知 ${it.href}`); continue; }
+        // 10-21 bug4 修复：不再生成前标记已见（生成失败=通知永久丢失）；改为各出口标——成功入队/转待办/确定跳过时
+        if (!userCapOk(it.author)) { audit({ action: 'inboxSkip', target: it.author, note: '单用户回复上限' }); st.seenNotifs[key] = nowIso(); continue; }
+        if (DRY) { LOG(`[DRY] 应回复 @${it.author} 的通知 ${it.href}`); st.seenNotifs[key] = nowIso(); continue; }
         const postUrl = 'https://x.com' + it.href;
         const statusId = (it.href.match(/status\/(\d+)/) || [])[1];
         // ── 分场景双阈值（10-21 codex 裁决版 B，用户拍板）：招呼 ≤12 硬门 / 轻内容 ≤20 硬门 / 实质提问转人工待办 ──
@@ -355,6 +364,7 @@ if (WATCHDOG) {
           try { todo = JSON.parse(fs.readFileSync(todoFile, 'utf8')); if (!Array.isArray(todo.pending)) todo.pending = []; } catch { }
           todo.pending.push({ at: nowIso(), author: it.author, text: txt0.slice(0, 120), postUrl, statusId, status: 'pending' });
           fs.writeFileSync(todoFile, JSON.stringify(todo, null, 2));
+          st.seenNotifs[key] = nowIso(); saveSt(st); // 转待办=已处理，标已见
           audit({ action: 'humanTodo', target: it.author, note: '实质提问转人工: ' + txt0.slice(0, 30) });
           continue;
         }
@@ -362,19 +372,22 @@ if (WATCHDOG) {
         const hardCap = scene === 'greet' ? (RC.greetHardLen || 12) : (RC.lightHardLen || 20);
         const target = scene === 'greet' ? '4-10 个字，像手机上顺手回的一句' : '8-16 个字，一句话点到对方说的具体内容';
         // 超长硬拒→重生成一次（保留原意压到上限，不是硬缩到极短）→仍超跳过
+        // 10-21 bug3 修复：history 接真实环形缓冲（原恒空致防复读断线）；casual=true 放行无标点短句
         const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人回应对方；回复 ${target}。`;
-        let r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: [], channel: RC.llmChannel, maxLen: hardCap, fallbackProvider: RC.llmFallback }).catch(() => null);
-        let qc = r && r.text ? quality.check(r.text, {}) : null;
+        let r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: recentHistory(), channel: RC.llmChannel, maxLen: hardCap, fallbackProvider: RC.llmFallback }).catch(() => null);
+        let qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [], casual: true }) : null;
         if (qc && qc.ok && visLen(qc.cleaned) > hardCap) {
           audit({ action: 'replyLen', target: it.author, note: `${scene}超长${visLen(qc.cleaned)}字重生成` });
-          r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: brief + `上一版超长了，保留原意压缩到 ${hardCap} 字以内，压不了就别说。`, history: [], channel: RC.llmChannel, maxLen: hardCap, fallbackProvider: RC.llmFallback }).catch(() => null);
-          qc = r && r.text ? quality.check(r.text, {}) : null;
+          r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: brief + `上一版超长了，保留原意压缩到 ${hardCap} 字以内，压不了就别说。`, history: recentHistory(), channel: RC.llmChannel, maxLen: hardCap, fallbackProvider: RC.llmFallback }).catch(() => null);
+          qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [], casual: true }) : null;
         }
-        if (qc && qc.ok && visLen(qc.cleaned) > hardCap) { audit({ action: 'replyLen', target: it.author, note: `${scene}仍超长跳过(${visLen(qc.cleaned)}字)` }); continue; }
+        if (qc && qc.ok && visLen(qc.cleaned) > hardCap) { audit({ action: 'replyLen', target: it.author, note: `${scene}仍超长跳过(${visLen(qc.cleaned)}字)` }); st.seenNotifs[key] = nowIso(); saveSt(st); continue; }
         if (qc && qc.ok) {
           sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: qc.cleaned, sendAt: Date.now() + rand(RC.replyDelayMin[0], RC.replyDelayMin[1]) * 60000 });
+          st.pendingInbox = (st.pendingInbox || []).concat([{ statusId, postUrl, author: it.author, text: qc.cleaned, sendAt: sendQueue[sendQueue.length - 1].sendAt }]); saveSt(st); // 10-21 bug5：待发持久化，重启不丢
+          st.seenNotifs[key] = nowIso(); saveSt(st);
           queued++;
-        } else audit({ action: 'replyGen', note: `@${it.author} 生成未过门(${qc ? qc.reason : 'LLM失败'})` });
+        } else { audit({ action: 'replyGen', note: `@${it.author} 生成未过门(${qc ? qc.reason : 'LLM失败'})` }); st.seenNotifs[key] = nowIso(); saveSt(st); }
       }
       // 观测日志（10-20：全天 0 产出却零日志的教训）——每轮都记录看到什么
       LOG(`页1：通知 ${items.length} 条 / 回复类 ${replyish} / 新入队 ${queued}`);
@@ -407,14 +420,14 @@ if (WATCHDOG) {
       for (const p of take) {
         if (aborted) break; // 回复总量帽已拆（10-20 拍板'回复不需要帽子'）；单用户上限见 userReplyCount
         if (!userCapOk(p.author)) { audit({ action: 'patrolSkip', target: p.author, note: '单用户回复上限' }); continue; }
-        const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注、常来往（不要声称已关注）。', history: [], channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
-        const qc = r && r.text ? quality.check(r.text, {}) : null;
+        const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注、常来往（不要声称已关注）。', history: recentHistory(), channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
+        const qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [] }) : null;
         if (!(qc && qc.ok)) { audit({ action: 'patrolGen', target: p.author, note: `生成未过门(${qc ? qc.reason : 'LLM失败'})，跳过` }); continue; }
         if (DRY) { LOG(`[DRY] 应评论 @${p.author}: ${qc.cleaned.slice(0, 30)}…`); continue; }
         // 动作隔离（10-20 用户建议）：每个动作独立临时页+用完即关，与搜索页状态彻底解耦；瞬态错误重试一次
         const postUrl = 'https://x.com' + (p.link || ('/i/web/status/' + p.id));
         let rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned)));
-        if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(p.author); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
+        if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(p.author); pushReplyHistory(qc.cleaned); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
         else audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: 'failed', note: rr.note });
         if (rr.ok && usedToday('follow') < RC.followCapDay) {
           const fo = await withTempPage(browser, (pg) => retryTransient(() => followOnPage(pg, p.author)));
@@ -525,10 +538,17 @@ if (WATCHDOG) {
         if (q.kind === 'replyInbox') {
           // 队列发送也包瞬态重试+兜底捕获（10-20：裸 replyOnPage 抛 ProtocolError 会把条目吃掉并冒泡打断主循环）；
           // 且走独立临时页（对照实锤：长期停在通知页的 pageReply 会 wedge，临时页从未卡过）
-          const rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, q.statusId, q.postUrl, q.text))).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
-          if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(q.author); audit({ action: 'inboxReply', target: q.author, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
+          // 10-21 bug2 修复：风控 toast 在临时页上读（原查 pageReply 常驻页=永远读不到，风控信号漏检）；
+          // 成功/不明都写回复历史（防复读），并从持久化待发里移除（bug5 配套）
+          const rr = await withTempPage(browser, async (pg) => {
+            const r2 = await retryTransient(() => replyOnPage(pg, q.statusId, q.postUrl, q.text));
+            const risk = await riskToast(pg).catch(() => null); // 页关前读走 toast
+            return { ...r2, risk };
+          }).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
+          if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(q.author); pushReplyHistory(q.text); audit({ action: 'inboxReply', target: q.author, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
           else audit({ action: 'inboxReply', target: q.author, status: 'failed', note: rr.note });
-          if (await checkAbort(pageReply, '光速回复')) break;
+          st.pendingInbox = (st.pendingInbox || []).filter((x) => x.statusId !== q.statusId); saveSt(st);
+          if (rr.risk) { const lg = loadLedger(); lg.meta.abortedToday = today(); lg.meta.abortReason = '风控toast(光速回复): ' + rr.risk; writeJson(LEDGER_FILE, lg); aborted = true; audit({ action: 'abort', note: '光速回复: ' + rr.risk }); LOG('⚠ 风控 toast，当日熔断: ' + rr.risk); break; }
         } else if (q.kind === 'cloud') {
           if (usedToday('postCloud') >= RC.postCapDay) { audit({ action: 'cloudPost', status: 'skipped', note: '云帖帽满' }); continue; }
           const rr = await retryTransient(() => postOnPage(pagePost, q.text)).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
