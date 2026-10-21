@@ -63,15 +63,18 @@ const quota = () => { const h = new Date().getHours(); const [d, e] = [8, 22]; r
         let dirty = false;
         for (const e of q) {
           if (e.status !== 'failed' || e.requeued) continue;
+          // 补跑封顶 2 轮（10-21 复核补漏）：收编后的条目再失败会被下小时再收编→无限循环抢额度，
+          // 轮次计数必须穿过新队列文件传递（新文件条目丢了 requeueOf，只有 sweepRound 保命）
+          if ((e.sweepRound || 0) >= 2) { e.sweepAbandoned = true; e.result = (e.result || '') + ' → 补跑 2 轮仍败，放弃'; dirty = true; continue; }
           if (entries.length >= take) break;
           let t = e.text;
           if (quality.weightedLen(t) > 270) {
             const fx = await ensurePostLen(t, { channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
             if (fx && fx.text) t = fx.text;
           }
-          entries.push({ text: t, quote: e.quote, quoteUrl: e.quoteUrl, requeueOf: e.id });
-          e.requeued = true; e.result = (e.result || '') + ` → 补跑清扫收编(${today()})`; dirty = true;
-          audit({ action: 'cloudSweep', status: 'requeued', id: e.id, note: `加权${quality.weightedLen(e.text)}→${quality.weightedLen(t)}` });
+          entries.push({ text: t, quote: e.quote, quoteUrl: e.quoteUrl, requeueOf: e.id, sweepRound: (e.sweepRound || 0) + 1 });
+          e.requeued = true; e.result = (e.result || '') + ` → 补跑清扫收编(${today()}，第${(e.sweepRound || 0) + 1}轮)`; dirty = true;
+          audit({ action: 'cloudSweep', status: 'requeued', id: e.id, note: `加权${quality.weightedLen(e.text)}→${quality.weightedLen(t)} 第${(e.sweepRound || 0) + 1}轮` });
         }
         if (dirty) writeJson(p, q);
         if (entries.length >= take) break;
@@ -108,7 +111,7 @@ const quota = () => { const h = new Date().getHours(); const [d, e] = [8, 22]; r
   const queue = entries.map((e, i) => {
     const postAt = Date.now() + delayMin * 60000;
     delayMin += rand(2, 8);
-    return { id: `${today()}-cloud-${ACCOUNT}-${new Date().getHours()}-${i + 1}`, account: ACCOUNT, type: 'post', kind: 'cloud-post', text: e.text, quote: e.quote, quoteUrl: e.quoteUrl, window: 'cloud', postAt: new Date(postAt).toISOString(), status: 'planned', createdAt: nowIso() };
+    return { id: `${today()}-cloud-${ACCOUNT}-${new Date().getHours()}-${i + 1}`, account: ACCOUNT, type: 'post', kind: 'cloud-post', text: e.text, quote: e.quote, quoteUrl: e.quoteUrl, window: 'cloud', sweepRound: e.sweepRound || 0, postAt: new Date(postAt).toISOString(), status: 'planned', createdAt: nowIso() };
   });
   if (DRY) { for (const e of queue) LOG(`[DRY] ${new Date(e.postAt).toTimeString().slice(0, 5)}: ${e.text.slice(0, 50)}…`); process.exit(0); }
   writeJson(qFile, queue);
