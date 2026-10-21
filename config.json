@@ -628,7 +628,10 @@
       },
       "cloudScheduler": true,
       "llmFallback": "ali",
-      "replyLenNote": "10-21 拍板（用户实测自己 16 条手动回复：平均 8.9 字/中位 8/全部≤20字/69%≤10字）：光速回复硬限 ≤10 字，20 字=长回复例外"
+      "replyLenNote": "10-21 拍板（用户实测自己 16 条手动回复：平均 8.9 字/中位 8/全部≤20字/69%≤10字）：光速回复硬限 ≤10 字，20 字=长回复例外",
+      "greetHardLen": 12,
+      "lightHardLen": 20,
+      "lenNote": "10-21 codex 裁决版 B（用户拍板）：招呼≤12 硬门 / 轻内容≤20 硬门 / 实质提问转人工待办队列（human-todo-<账号>.json，进飞书报告）"
     }
   },
   "freshData": {

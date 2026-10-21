@@ -87,6 +87,17 @@ async function push(text) {
   const hbAge = rs && rs.heartbeatAt ? Math.round((Date.now() - Date.parse(rs.heartbeatAt)) / 60000) : -1;
   lines.push(`\n🏠 fullwin 常驻：${hbAge >= 0 ? (hbAge < 20 ? `✅心跳 ${hbAge}min前` : `❌心跳超时 ${hbAge}min前`) : '未在运行（人工时段）'}`);
 
+  // 待人工回复（实质提问队列，codex 裁决：审计≠待办，必须可见）
+  let todoCount = 0;
+  try {
+    for (const a of accounts) {
+      const td = readJson(path.join(STATE_DIR, 'human-todo-' + a.key + '.json'), null);
+      const pend = (td && td.pending || []).filter((x) => x.status === 'pending');
+      if (pend.length) { lines.push(`
+📬 待你人工回复（@${a.handle}，${pend.length} 条）：`); pend.slice(0, 3).forEach((x) => lines.push('  · @' + x.author + '：' + (x.text || '').slice(0, 30) + ' → ' + x.postUrl)); todoCount += pend.length; }
+    }
+  } catch { }
+
   // 卡点=近 6 小时异常条目（与动作量同窗，6h 脉冲口径）
   const logFile = path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`);
   let abnormal = [];

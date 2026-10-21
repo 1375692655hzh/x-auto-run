@@ -341,17 +341,36 @@ if (WATCHDOG) {
         if (DRY) { LOG(`[DRY] 应回复 @${it.author} 的通知 ${it.href}`); continue; }
         const postUrl = 'https://x.com' + it.href;
         const statusId = (it.href.match(/status\/(\d+)/) || [])[1];
-        // 10-21 拍板：光速回复 ≤10 字（用户实测自己 16 条：平均 8.9/中位 8）；超长硬拒一次后重生成，仍超则跳过
-        const RL = RC.replyMaxLen || 10;
-        const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人礼貌地回应对方；回复不超过 ${RL} 个字，像手机上随手打的一句话，越短越好。`;
-        let r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: [], channel: RC.llmChannel, maxLen: RL, fallbackProvider: RC.llmFallback }).catch(() => null);
+        // ── 分场景双阈值（10-21 codex 裁决版 B，用户拍板）：招呼 ≤12 硬门 / 轻内容 ≤20 硬门 / 实质提问转人工待办 ──
+        const txt0 = (it.txt || '').replace(/^(@\w+\s*)+/, '').trim();
+        const visLen = (s) => [...String(s)].length; // 字素级长度（codex 指出：JS length 把 emoji 算 2 码元，口径用字素）
+        const hasQWord = /怎么|为什么|什么|哪|如何|能不能|是不是|讲讲|说说|分析|解释|止损|仓位|建议|看法|怎么看|什么渠道|怎么开/.test(txt0);
+        const hasQ = /[？?]/.test(txt0);
+        const isGreet = /来了|来咯|欢迎|大佬好|膜拜|互关|回关|关注你|关注了|已关注|回访|支持一波|报到|串门|顶|前排|围观|做大做强|兄弟|学习|不错|可以|强|牛|厉害|早上好|早安|晚安|好呀/.test(txt0) && visLen(txt0) <= 24 && !(hasQWord && (hasQ || visLen(txt0) > 10)); // codex 复核修正：社交问号不误杀（早上好呀？）、已关注/回访类招呼收编
+        const isQuestion = (hasQWord && (hasQ || visLen(txt0) >= 6)) || /讲讲|说说|分析|解释/.test(txt0); // 问词+≥6字即实质提问（'你蓝V走的什么渠道'这类无问号短问） // 实质提问=问词+问号或够长；祈使问（讲讲/说说）无问号也算；社交问号不算
+        if (isQuestion) {
+          // 实质提问不硬回短答——转人工待办队列（可见队列，不是审计一行），用户手动补答
+          const todoFile = path.join(STATE_DIR, `human-todo-${ACCOUNT}.json`);
+          let todo = { pending: [] };
+          try { todo = JSON.parse(fs.readFileSync(todoFile, 'utf8')); if (!Array.isArray(todo.pending)) todo.pending = []; } catch { }
+          todo.pending.push({ at: nowIso(), author: it.author, text: txt0.slice(0, 120), postUrl, statusId, status: 'pending' });
+          fs.writeFileSync(todoFile, JSON.stringify(todo, null, 2));
+          audit({ action: 'humanTodo', target: it.author, note: '实质提问转人工: ' + txt0.slice(0, 30) });
+          continue;
+        }
+        const scene = isGreet ? 'greet' : 'light';
+        const hardCap = scene === 'greet' ? (RC.greetHardLen || 12) : (RC.lightHardLen || 20);
+        const target = scene === 'greet' ? '4-10 个字，像手机上顺手回的一句' : '8-16 个字，一句话点到对方说的具体内容';
+        // 超长硬拒→重生成一次（保留原意压到上限，不是硬缩到极短）→仍超跳过
+        const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人回应对方；回复 ${target}。`;
+        let r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: [], channel: RC.llmChannel, maxLen: hardCap, fallbackProvider: RC.llmFallback }).catch(() => null);
         let qc = r && r.text ? quality.check(r.text, {}) : null;
-        if (qc && qc.ok && (qc.cleaned || '').length > RL) {
-          audit({ action: 'replyLen', target: it.author, note: `超长${(qc.cleaned || '').length}字重生成` });
-          r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: brief + `上一版太长了，这次控制在 6 个字左右。`, history: [], channel: RC.llmChannel, maxLen: RL, fallbackProvider: RC.llmFallback }).catch(() => null);
+        if (qc && qc.ok && visLen(qc.cleaned) > hardCap) {
+          audit({ action: 'replyLen', target: it.author, note: `${scene}超长${visLen(qc.cleaned)}字重生成` });
+          r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: brief + `上一版超长了，保留原意压缩到 ${hardCap} 字以内，压不了就别说。`, history: [], channel: RC.llmChannel, maxLen: hardCap, fallbackProvider: RC.llmFallback }).catch(() => null);
           qc = r && r.text ? quality.check(r.text, {}) : null;
         }
-        if (qc && qc.ok && (qc.cleaned || '').length > RL) { audit({ action: 'replyLen', target: it.author, note: `仍超长跳过(${(qc.cleaned || '').length}字)` }); continue; }
+        if (qc && qc.ok && visLen(qc.cleaned) > hardCap) { audit({ action: 'replyLen', target: it.author, note: `${scene}仍超长跳过(${visLen(qc.cleaned)}字)` }); continue; }
         if (qc && qc.ok) {
           sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: qc.cleaned, sendAt: Date.now() + rand(RC.replyDelayMin[0], RC.replyDelayMin[1]) * 60000 });
           queued++;
