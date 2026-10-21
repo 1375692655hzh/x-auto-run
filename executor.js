@@ -454,7 +454,7 @@ function executeAction(page, entry) {
     let page = null;
     if (!SIMULATE) {
       ws = await openWindow(ACCT.profileId);
-      browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
+      browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 90000 });
       // 记录进入前的既有页签（10-21 修复：窗口可能被常驻进程/其他任务占用，清理时只能关自己新开的，别拆别人工位）
       try { PRE_EXISTING_PAGES = new Set(await browser.pages()); } catch { PRE_EXISTING_PAGES = new Set(); }
       page = await browser.newPage();
@@ -462,6 +462,20 @@ function executeAction(page, entry) {
       await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
       await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
       if (!(await verifyLogin(page, ACCT.handle))) throw new Error(`登录态校验失败：期望 @${ACCT.handle}`);
+    }
+    // 动作临时页隔离（10-21 移植 fullwin 10-20 根因修复）：每个动作独立临时页用完即关——
+    // 状态污染不跨动作累积（P1/P2 CDP 瞬态连错的治本）；风控气泡在关页前读走（fullwin bug2 教训：查错页=永远读不到）
+    const latchToast = (t) => { sessionAborted = true; LEDGER.meta.abortedToday = today(); LEDGER.meta.abortReason = '风控toast: ' + t; saveLedger(LEDGER); };
+    async function runAct(fn) {
+      if (SIMULATE) return { r: await fn(null), toast: null };
+      const pg = await browser.newPage();
+      pg.on('dialog', (d) => d.accept().catch(() => { }));
+      try {
+        await pg.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
+        const r = await fn(pg);
+        const t = await readToast(pg).catch(() => null);
+        return { r, toast: t && RISK_TOAST.test(t) ? t : null };
+      } finally { try { await pg.close(); } catch { } }
     }
     // 选品器（10-20 用户拍板"交付必达"）：到点定时帖永远插队先发（排期误差压到秒级，不再被主轮锁压 30-45 分钟）；
     // 其余按队列顺序。死线只收本会话不判死队列——planned 项留给补跑节/round --entry 续跑
@@ -529,8 +543,10 @@ function executeAction(page, entry) {
 
       let r;
       if (e.type === 'reply' && e.followFirst) {
-        const fr = await (SIMULATE ? Promise.resolve({ ok: true, simulated: true }) : followUser(page, e.targetHandle));
+        const fw = await runAct((pg) => (SIMULATE ? Promise.resolve({ ok: true, simulated: true }) : followUser(pg, e.targetHandle).catch((err) => ({ ok: false, note: err.message }))));
+        const fr = fw.r;
         log({ action: 'execute', kind: e.kind || undefined, id: e.id + '-follow', type: 'follow', target: e.targetHandle, status: fr.ok ? 'done' : 'unknown', note: '互关先关注' });
+        if (fw.toast) { latchToast(fw.toast); log({ action: 'abort', id: e.id + '-follow', note: '风控toast(先关注): ' + fw.toast }); }
         if (!fr.ok) {
           // 先关注失败则不发回复（Kimi 评审抓出：文案口径"可如实说已关注"，关注没成仍回复=虚假表述风险）
           ledgerRecord('follow');
@@ -541,14 +557,17 @@ function executeAction(page, entry) {
         syncContacts(e, 'follow'); ledgerRecord('follow'); // 先关注同样计入滚动关注账本（2026-10-16 修复：此前漏记）
         await gsleep(X.followFirstGapGaussMs);
       }
-      r = await executeAction(page, e).catch((err) => ({ ok: false, note: err.message }));
+      let res = await runAct((pg) => executeAction(pg, e).catch((err) => ({ ok: false, note: err.message })));
+      r = res.r;
       // 瞬态错误（协议超时/网络抖动）：3 次退避重试（8/15/30s）——10-20 用户拍板"交付必达"：单点抖动不许丢量。
-      // 仍败记 failed 并打 transientFail 标记（不投任何票），会话收尾时翻回 planned 交补跑节再试（retryRound<2 封顶防死循环）
+      // 仍败记 failed 并打 transientFail 标记（不投任何票），会话收尾时翻回 planned 交补跑节再试（retryRound<2 封顶防死循环）；
+      // 10-21：重试也走 runAct（每次重开新临时页，隔离延伸到重试）
       const isTransient = (rr) => /Protocol error|timed out|TimeoutError|net::|ERR_/i.test((rr && rr.note) || '');
       let transient = isTransient(r);
       for (let a = 0; !r.ok && !r.unknown && transient && a < 3; a++) {
         await sleep([8000, 15000, 30000][a]);
-        r = await executeAction(page, e).catch((err) => ({ ok: false, note: err.message }));
+        res = await runAct((pg) => executeAction(pg, e).catch((err) => ({ ok: false, note: err.message })));
+        r = res.r;
         transient = isTransient(r);
         if (r.ok) r.note = '瞬态重试成功(第' + (a + 1) + '次重试)';
       }
@@ -577,10 +596,7 @@ function executeAction(page, entry) {
       saveQueue(queue);
       log({ action: 'execute', kind: e.kind || undefined, id: e.id, type: e.type, target: e.targetHandle || e.statusId, status: e.status, note: e.result, text: (e.type === 'post' || e.type === 'reply') ? String(e.text).slice(0, 60) : undefined });
 
-      if (!sessionAborted) {
-        const t = await (SIMULATE ? Promise.resolve(null) : riskToast(page));
-        if (t) { sessionAborted = true; LEDGER.meta.abortedToday = today(); LEDGER.meta.abortReason = '风控toast: ' + t; saveLedger(LEDGER); }
-      }
+      if (!sessionAborted && res.toast) latchToast(res.toast); // 风控气泡已在动作页关页前读走（10-21 随临时页隔离）
       if (done < MAX_ACTIONS) await gsleep(X.actionGapGaussMs);
     }
     // 交付必达（10-20 拍板）：熔断已拆，不再有任何"会话中止清场"——planned 项永远不死在队列里。

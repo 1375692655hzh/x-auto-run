@@ -212,7 +212,7 @@ async function postSlot(acc, slot) {
     const oj = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: acct.profileId }) }).then((r) => r.json());
     if (!oj.success) throw new Error('开窗失败: ' + JSON.stringify(oj));
     ws = oj.data.ws;
-    browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
+    browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 90000 });
     const page = await browser.newPage();
     page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开（10-20 全天 CDP 超时真凶）
     await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });

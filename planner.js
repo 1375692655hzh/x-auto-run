@@ -277,7 +277,7 @@ async function planFollowback(ts) {
   const ws = await openWindow(ACCT.profileId);
   let cands = [];
   try {
-    const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
+    const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 90000 });
     const page = await browser.newPage();
     page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开
     try {
@@ -353,7 +353,7 @@ async function planUnfollow(ts) {
   const ws = await openWindow(ACCT.profileId);
   let cands = [];
   try {
-    const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
+    const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 90000 });
     const page = await browser.newPage();
     page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开
     try {

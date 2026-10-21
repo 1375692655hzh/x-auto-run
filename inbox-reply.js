@@ -181,7 +181,7 @@ async function replyToComment(page, postUrl, statusId, text) {
     const oj = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).then((r) => r.json());
     if (!oj.success) throw new Error('开窗失败: ' + JSON.stringify(oj));
     ws = oj.data.ws;
-    browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
+    browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 90000 });
     const page = await browser.newPage();
     page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框（10-20 真凶）
     await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
@@ -261,7 +261,8 @@ async function replyToComment(page, postUrl, statusId, text) {
             const tc = quality.check(tmpl, { casual: true, history: hist });
             if (tc.ok && visLen(tc.cleaned) <= IR.greetHardLen) {
               if (DRY) { console.log(`[DRY] 模板回复 @${it.author}: ${tc.cleaned}`); st.seenNotifs[key] = { at: nowIso(), status: 'dry' }; continue; }
-              await sleep(rand(500, 3000));
+              // 场景化延迟（10-21 P1-③，fullwin 批3 移植）：greet 快回/light 想一下再回；inline 发送架构取短版防积压
+              await sleep(scene === 'greet' ? rand(10000, 45000) : rand(60000, 180000));
               let rr = await replyToComment(page, 'https://x.com' + it.href, statusId, tc.cleaned).catch((e) => ({ ok: false, note: e.message }));
               if (rr.ok) {
                 st.seenNotifs[key] = { at: nowIso(), status: 'done' };
@@ -306,7 +307,8 @@ async function replyToComment(page, postUrl, statusId, text) {
           st.seenNotifs[key] = { at: nowIso(), status: 'genFail' }; saveSt(st); continue;
         }
         if (DRY) { console.log(`[DRY] 应回复 @${it.author}（${scene}）: ${qc.cleaned}`); st.seenNotifs[key] = { at: nowIso(), status: 'dry' }; continue; }
-        await sleep(rand(500, 3000));
+        // 场景化延迟（同上：greet 快回 / light 想一下再回）
+        await sleep(scene === 'greet' ? rand(10000, 45000) : rand(60000, 180000));
         let rr = await replyToComment(page, 'https://x.com' + it.href, statusId, qc.cleaned).catch((e) => ({ ok: false, note: e.message }));
         if (!rr.ok && !rr.unknown && /Protocol error|timed out|TimeoutError|net::|ERR_/i.test(rr.note || '')) { await sleep(8000); rr = await replyToComment(page, 'https://x.com' + it.href, statusId, qc.cleaned).catch((e) => ({ ok: false, note: e.message + '（重试后仍败）' })); }
         const toast = await page.evaluate((sel) => { const t = document.querySelector(sel); return t ? (t.textContent || '').trim().slice(0, 80) : null; }, SEL.toast).catch(() => null);
