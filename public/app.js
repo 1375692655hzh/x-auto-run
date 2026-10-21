@@ -127,69 +127,7 @@ function renderOverview() {
   h += '</table>';
   h += '<div style="font-size:10px;color:#98a5b1;margin-top:5px">幽灵=回复是否被隐藏 · 降权=回复排序是否被压 · 搜索=搜索结果是否被排除 · 建议=搜索建议是否被移除 · 收录=typeahead 是否收录 · 全部来自每日只读检测（纯 HTTP/借观察者窗口渲染）</div></div>';
 
-  // D. 今日节奏条
-  h += '<div class="card" style="padding:10px 16px"><div style="font-weight:700;font-size:14px;margin-bottom:8px">今日节奏</div><div style="display:flex;gap:4px;flex-wrap:wrap">';
-  var bjNowMin = new Date(Date.now() + 8 * 3600000).toISOString().slice(11, 16);
-  for (var w = 0; w < ov.windowsList.length; w++) {
-    var win = ov.windowsList[w];
-    var isPast = win.time < bjNowMin;
-    var isNext = ov.nextWindow && win.time === ov.nextWindow.time;
-    h += '<span style="padding:4px 8px;border-radius:5px;font-size:12px;' + (isPast ? 'background:#e2f4e8;color:#1f6e43' : isNext ? 'background:#fff3cd;color:#856404;font-weight:700' : 'background:#f1f3f6;color:#8a97a3') + '">' + (isPast ? '✓' : isNext ? '◉' : '○') + ' ' + win.time + ' ' + win.key + '</span>';
-  }
-  h += '</div></div>';
-
-  // F. 接入号胶囊
-  if (otherAccounts.length) {
-    h += '<div class="card" style="padding:8px 16px"><div style="font-size:12px;color:#8a97a3;margin-bottom:6px">接入号（不执行任务）</div><div style="display:flex;gap:8px;flex-wrap:wrap">';
-    for (var o = 0; o < otherAccounts.length; o++) {
-      var oa = otherAccounts[o];
-      h += '<span style="background:#f1f3f6;padding:3px 10px;border-radius:12px;font-size:12px">' + esc(oa.name) + ' · ' + (oa.metrics[0].val != null ? oa.metrics[0].val + '粉' : '?') + ' · 雷达' + (oa.radar && oa.radar.four ? oa.radar.four.score || '?' : '?') + '</span>';
-    }
-    h += '</div></div>';
-  }
-
-  // 动作流 15 条
-  h += '<div class="card"><h3>今日动作流（实时）</h3>';
-  if (!ov.actionStream.length) h += '<div style="font-size:13px;color:#8a97a3;padding:8px 0">今日尚无真实动作</div>';
-  else {
-    h += '<table style="width:100%;font-size:13px"><tr style="color:#8a97a3;font-size:11px"><td style="width:60px">时间</td><td style="width:70px">账号</td><td style="width:60px">动作</td><td>对象</td><td style="width:30px">结果</td></tr>';
-    for (var s = 0; s < ov.actionStream.length; s++) {
-      var as2 = ov.actionStream[s];
-      h += '<tr><td>' + as2.at + '</td><td>' + esc(as2.account) + '</td><td>' + esc(as2.action) + '</td><td>' + esc(as2.target) + '</td><td>' + as2.status + '</td></tr>';
-    }
-    h += '</table>';
-  }
-  h += '</div>';
-
-  // 定时帖队列
-  if (ov.postsQueue.length) {
-    h += '<div class="card"><h3>定时帖队列</h3><table style="width:100%;font-size:13px"><tr style="color:#8a97a3;font-size:11px"><td style="width:60px">时刻</td><td style="width:70px">账号</td><td>内容</td><td style="width:50px">状态</td></tr>';
-    for (var p = 0; p < ov.postsQueue.length; p++) {
-      var pq = ov.postsQueue[p];
-      var pst = pq.status === 'done' ? '✓ 已发' : pq.status === 'unknown' ? '? 不明' : pq.status === 'skipped' ? '跳过' : Date.parse(pq.postAt) > Date.now() ? '⏱ 待发' : '⚠ 过点';
-      h += '<tr><td>' + (pq.postAt || '').slice(11, 16) + '</td><td>' + esc(pq.account) + '</td><td>' + esc(pq.text) + (pq.quote ? ' <b style="color:#1d6fb8">[引用]</b>' : '') + '</td><td>' + pst + '</td></tr>';
-    }
-    h += '</table></div>';
-  }
-
-  // 7 日完成趋势（④）+ 周汇总
-  if (ov.trend && ov.trend.length) {
-    h += '<div class="card"><h3>近 7 日完成趋势<span style="font-weight:400;font-size:11px;color:#98a5b1">（完成量柱 · 完成率行 · 口径：条件任务不计分母）</span></h3>';
-    h += '<div style="display:flex;gap:3px;align-items:flex-end;height:50px;margin:8px 0">';
-    var maxD = Math.max.apply(null, ov.trend.map(function(x){return x.done;})) || 1;
-    for (var t = 0; t < ov.trend.length; t++) {
-      var tr = ov.trend[t];
-      var bh = Math.round((tr.done / maxD) * 44) + 3;
-      h += '<div style="flex:1;text-align:center"><div style="background:#4a9e6f;height:' + bh + 'px;border-radius:2px" title="' + tr.d + ' 完成' + tr.done + '"></div><div style="font-size:9px;color:#8a97a3;margin-top:2px">' + tr.d.slice(5) + '</div></div>';
-    }
-    h += '</div>';
-    var totalDone = 0, totalPlan = 0;
-    for (var t2 = 0; t2 < ov.trend.length; t2++) { totalDone += ov.trend[t2].done; totalPlan += ov.trend[t2].planned; }
-    h += '<div style="font-size:13px;color:#51606e">周汇总：真实动作 <b>' + totalDone + '</b> 件 · 完成率 <b>' + (totalPlan > 0 ? Math.round(totalDone / totalPlan * 100) : 0) + '%</b> · 日报 ' + (ov.weekSummary ? ov.weekSummary.reportsGenerated : '?') + '/' + (ov.weekSummary ? ov.weekSummary.days : 7) + '</div>';
-    h += '</div>';
-  }
-
-  // 全账号数据区（左右各半：左=粉丝走势折线，右=核心指标表；数据=健康日检快照，纯 HTTP 零浏览器）
+  // 全账号数据区（10-21 用户拍板：粉丝走势+粉丝量两图挪到健康监测正下方）
   h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">';
 
   // 左：粉丝走势折线
@@ -305,6 +243,68 @@ function renderOverview() {
   h += '</div>';
 
   h += '</div>'; // 关闭左右 grid
+
+  // D. 今日节奏条
+  h += '<div class="card" style="padding:10px 16px"><div style="font-weight:700;font-size:14px;margin-bottom:8px">今日节奏</div><div style="display:flex;gap:4px;flex-wrap:wrap">';
+  var bjNowMin = new Date(Date.now() + 8 * 3600000).toISOString().slice(11, 16);
+  for (var w = 0; w < ov.windowsList.length; w++) {
+    var win = ov.windowsList[w];
+    var isPast = win.time < bjNowMin;
+    var isNext = ov.nextWindow && win.time === ov.nextWindow.time;
+    h += '<span style="padding:4px 8px;border-radius:5px;font-size:12px;' + (isPast ? 'background:#e2f4e8;color:#1f6e43' : isNext ? 'background:#fff3cd;color:#856404;font-weight:700' : 'background:#f1f3f6;color:#8a97a3') + '">' + (isPast ? '✓' : isNext ? '◉' : '○') + ' ' + win.time + ' ' + win.key + '</span>';
+  }
+  h += '</div></div>';
+
+  // F. 接入号胶囊
+  if (otherAccounts.length) {
+    h += '<div class="card" style="padding:8px 16px"><div style="font-size:12px;color:#8a97a3;margin-bottom:6px">接入号（不执行任务）</div><div style="display:flex;gap:8px;flex-wrap:wrap">';
+    for (var o = 0; o < otherAccounts.length; o++) {
+      var oa = otherAccounts[o];
+      h += '<span style="background:#f1f3f6;padding:3px 10px;border-radius:12px;font-size:12px">' + esc(oa.name) + ' · ' + (oa.metrics[0].val != null ? oa.metrics[0].val + '粉' : '?') + ' · 雷达' + (oa.radar && oa.radar.four ? oa.radar.four.score || '?' : '?') + '</span>';
+    }
+    h += '</div></div>';
+  }
+
+  // 动作流 15 条
+  h += '<div class="card"><h3>今日动作流（实时）</h3>';
+  if (!ov.actionStream.length) h += '<div style="font-size:13px;color:#8a97a3;padding:8px 0">今日尚无真实动作</div>';
+  else {
+    h += '<table style="width:100%;font-size:13px"><tr style="color:#8a97a3;font-size:11px"><td style="width:60px">时间</td><td style="width:70px">账号</td><td style="width:60px">动作</td><td>对象</td><td style="width:30px">结果</td></tr>';
+    for (var s = 0; s < ov.actionStream.length; s++) {
+      var as2 = ov.actionStream[s];
+      h += '<tr><td>' + as2.at + '</td><td>' + esc(as2.account) + '</td><td>' + esc(as2.action) + '</td><td>' + esc(as2.target) + '</td><td>' + as2.status + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  h += '</div>';
+
+  // 定时帖队列
+  if (ov.postsQueue.length) {
+    h += '<div class="card"><h3>定时帖队列</h3><table style="width:100%;font-size:13px"><tr style="color:#8a97a3;font-size:11px"><td style="width:60px">时刻</td><td style="width:70px">账号</td><td>内容</td><td style="width:50px">状态</td></tr>';
+    for (var p = 0; p < ov.postsQueue.length; p++) {
+      var pq = ov.postsQueue[p];
+      var pst = pq.status === 'done' ? '✓ 已发' : pq.status === 'unknown' ? '? 不明' : pq.status === 'skipped' ? '跳过' : Date.parse(pq.postAt) > Date.now() ? '⏱ 待发' : '⚠ 过点';
+      h += '<tr><td>' + (pq.postAt || '').slice(11, 16) + '</td><td>' + esc(pq.account) + '</td><td>' + esc(pq.text) + (pq.quote ? ' <b style="color:#1d6fb8">[引用]</b>' : '') + '</td><td>' + pst + '</td></tr>';
+    }
+    h += '</table></div>';
+  }
+
+  // 7 日完成趋势（④）+ 周汇总
+  if (ov.trend && ov.trend.length) {
+    h += '<div class="card"><h3>近 7 日完成趋势<span style="font-weight:400;font-size:11px;color:#98a5b1">（完成量柱 · 完成率行 · 口径：条件任务不计分母）</span></h3>';
+    h += '<div style="display:flex;gap:3px;align-items:flex-end;height:50px;margin:8px 0">';
+    var maxD = Math.max.apply(null, ov.trend.map(function(x){return x.done;})) || 1;
+    for (var t = 0; t < ov.trend.length; t++) {
+      var tr = ov.trend[t];
+      var bh = Math.round((tr.done / maxD) * 44) + 3;
+      h += '<div style="flex:1;text-align:center"><div style="background:#4a9e6f;height:' + bh + 'px;border-radius:2px" title="' + tr.d + ' 完成' + tr.done + '"></div><div style="font-size:9px;color:#8a97a3;margin-top:2px">' + tr.d.slice(5) + '</div></div>';
+    }
+    h += '</div>';
+    var totalDone = 0, totalPlan = 0;
+    for (var t2 = 0; t2 < ov.trend.length; t2++) { totalDone += ov.trend[t2].done; totalPlan += ov.trend[t2].planned; }
+    h += '<div style="font-size:13px;color:#51606e">周汇总：真实动作 <b>' + totalDone + '</b> 件 · 完成率 <b>' + (totalPlan > 0 ? Math.round(totalDone / totalPlan * 100) : 0) + '%</b> · 日报 ' + (ov.weekSummary ? ov.weekSummary.reportsGenerated : '?') + '/' + (ov.weekSummary ? ov.weekSummary.days : 7) + '</div>';
+    h += '</div>';
+  }
 
   // 全账号指标表（移到两图下方，全宽）
   h += '<div class="card"><h3>全账号指标<span style="font-weight:400;font-size:11px;color:#98a5b1">（纯 HTTP · 不开浏览器）</span></h3>';
