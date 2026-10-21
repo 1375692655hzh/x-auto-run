@@ -210,6 +210,7 @@ async function retryTransient(fn) {
 // ── 看门狗模式 ──
 if (WATCHDOG) {
   (async () => {
+    if (fs.existsSync(path.join(STATE_DIR, 'PAUSE-' + ACCOUNT))) process.exit(0); // 账号级人工接管期：看门狗静默不拉起
     const st = loadSt();
     // 10-21 升级：心跳+页面双健康才算活——僵尸态（页面全 detached 但循环照跑）心跳照写曾骗过看门狗 7h
     const hbFresh = st.heartbeatAt && Date.now() - Date.parse(st.heartbeatAt) < 20 * 60000;
@@ -516,6 +517,7 @@ if (WATCHDOG) {
       if (!RC.cloudScheduler && !DRY && now.getMinutes() >= (RC.cloudPullMinute != null ? RC.cloudPullMinute : 50) && st.lastCloudHour !== hourKey) {
         st.lastCloudHour = hourKey; saveSt(st); await cloudSlot(hourKey); if (aborted) break;
       }
+      if (fs.existsSync(path.join(STATE_DIR, 'PAUSE-' + ACCOUNT))) { LOG('账号级人工接管（PAUSE 旗标），优雅退出'); break; } // 运行中被接管也立即收场，不用等下次启动
       if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { LOG('PAUSE 出现，退出'); break; }
     } catch (e) { LOG('主循环异常(继续): ' + String(e.stack || e.message).slice(0, 200)); audit({ action: 'loopError', note: String(e.stack || e.message).slice(0, 160) }); }
     await sleep(20 * 1000);
