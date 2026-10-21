@@ -549,8 +549,14 @@
       "#交朋友"
     ],
     "jitterMin": {
-      "butcher": [0, 15],
-      "wcixot": [20, 35]
+      "butcher": [
+        0,
+        15
+      ],
+      "wcixot": [
+        20,
+        35
+      ]
     },
     "note": "10-21 凌晨拍板：butcher/才女 每天 07:00/13:00/19:00 各 1 条互关帖（一天就这三次），按账号运行（每号独立 schtasks 任务+独立进程）；分钟按账号键随机（butcher +0~15min、才女 +20~35min 错开同刻指纹）；文案前一日 22:45 预制（根据前一天的换一批说法，防 X 同文重复墙），六标签程序附加（LLM 不碰标签）；帖帽由 executor.rollingCaps.post=60 覆盖"
   },
@@ -601,7 +607,7 @@
       "cloudDayHourMax": 2,
       "cloudNightHourMax": 1,
       "perUserReplyCapDay": 3,
-      "replyMaxLen": 20,
+      "replyMaxLen": 10,
       "topicPosts": {
         "enabled": true,
         "genAt": "05:50",
@@ -621,7 +627,8 @@
         "note": "10-20 拍板：全程预制——05:50 深滚 #蓝V互关 抓 24h 参考池，mimo 成批生成 10 条（分时段语气），整点±0~45min 定时发布；替代常驻页3"
       },
       "cloudScheduler": true,
-      "llmFallback": "ali"
+      "llmFallback": "ali",
+      "replyLenNote": "10-21 拍板（用户实测自己 16 条手动回复：平均 8.9 字/中位 8/全部≤20字/69%≤10字）：光速回复硬限 ≤10 字，20 字=长回复例外"
     }
   },
   "freshData": {

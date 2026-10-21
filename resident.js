@@ -341,8 +341,17 @@ if (WATCHDOG) {
         if (DRY) { LOG(`[DRY] 应回复 @${it.author} 的通知 ${it.href}`); continue; }
         const postUrl = 'https://x.com' + it.href;
         const statusId = (it.href.match(/status\/(\d+)/) || [])[1];
-        const r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是一条对方发给我们（回复或提及）的消息，作为帖子主人礼貌、具体地回应对方；回复控制在 20 字以内，像随手回的真人，越短越好。', history: [], channel: RC.llmChannel, maxLen: RC.replyMaxLen || 20, fallbackProvider: RC.llmFallback }).catch(() => null);
-        const qc = r && r.text ? quality.check(r.text, {}) : null;
+        // 10-21 拍板：光速回复 ≤10 字（用户实测自己 16 条：平均 8.9/中位 8）；超长硬拒一次后重生成，仍超则跳过
+        const RL = RC.replyMaxLen || 10;
+        const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人礼貌地回应对方；回复不超过 ${RL} 个字，像手机上随手打的一句话，越短越好。`;
+        let r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: [], channel: RC.llmChannel, maxLen: RL, fallbackProvider: RC.llmFallback }).catch(() => null);
+        let qc = r && r.text ? quality.check(r.text, {}) : null;
+        if (qc && qc.ok && (qc.cleaned || '').length > RL) {
+          audit({ action: 'replyLen', target: it.author, note: `超长${(qc.cleaned || '').length}字重生成` });
+          r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: brief + `上一版太长了，这次控制在 6 个字左右。`, history: [], channel: RC.llmChannel, maxLen: RL, fallbackProvider: RC.llmFallback }).catch(() => null);
+          qc = r && r.text ? quality.check(r.text, {}) : null;
+        }
+        if (qc && qc.ok && (qc.cleaned || '').length > RL) { audit({ action: 'replyLen', target: it.author, note: `仍超长跳过(${(qc.cleaned || '').length}字)` }); continue; }
         if (qc && qc.ok) {
           sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: qc.cleaned, sendAt: Date.now() + rand(RC.replyDelayMin[0], RC.replyDelayMin[1]) * 60000 });
           queued++;
