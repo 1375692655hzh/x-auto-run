@@ -66,20 +66,21 @@ async function renderInChrome(handle) {
     const os = require('os');
     chromeTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'radar-chrome-'));
     chromeBrowser = await puppeteer.launch({
-      executablePath: chromePath, headless: 'new', userDataDir: chromeTmpDir,
-      args: ['--no-first-run', '--no-default-browser-check', '--disable-blink-features=AutomationControlled', '--lang=zh-CN'],
+      executablePath: chromePath, headless: false, userDataDir: chromeTmpDir, // 10-21 改版修复：站点上 Vercel BotID（x-is-human 挑战）专杀无头 → 有头+去自动化标志（实测 POST /api/scan 403→200）
+      ignoreDefaultArgs: ['--enable-automation'],
+      args: ['--no-first-run', '--no-default-browser-check', '--disable-blink-features=AutomationControlled', '--lang=zh-CN', '--window-position=2400,100', '--window-size=900,900'],
     });
   }
   const page = await chromeBrowser.newPage();
   try {
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' });
     await page.goto(`https://shadowbanradar.com/zh/r/${handle}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    // 等判定容器出现（加载态会先渲染清单占位，终值 aria 由前端轮询补上）
+    // 等判定容器出现（加载态会先渲染清单占位，终值 aria 由前端 POST /api/scan 后重渲染补上——有头实测 ~8s）
     await page.waitForFunction(() => {
       const el = document.querySelector('[aria-label*="搜索建议限制"], [aria-label*="Search suggestion"]');
       const a = el && el.getAttribute('aria-label') || '';
       return /[:：]/.test(a) && !/正在计算|\[\d+\/4\]|请启用/i.test(a);
-    }, { timeout: 90000, polling: 2000 }).catch(() => { });
+    }, { timeout: 150000, polling: 2000 }).catch(() => { });
     const aria = await page.evaluate(() => {
       const el = document.querySelector('[aria-label*="搜索建议限制"], [aria-label*="Search suggestion"]');
       return el ? el.getAttribute('aria-label') : null;
@@ -170,7 +171,10 @@ function parseFour(text, aria) {
     const okFour = (f) => f && Object.values(f).some((v) => v != null);
     const merged = {};
     let anyOk = false;
-    for (const h of RC.handles) {
+    // 合并键集=配置内号 ∪ 当日/昨日有真值的键（10-21 复核：--handles 子集扫描不得抹掉其他号——
+    // 与 10-16 Owen 被覆盖事故同根；退役号（如 MacCostin5）不得以 channelError 形态自我复制）
+    const allH = new Set([...RC.handles, ...Object.keys(prev).filter((h) => okFour(prev[h] && prev[h].four)), ...Object.keys(prevDay).filter((h) => okFour(prevDay[h] && prevDay[h].four))]);
+    for (const h of allH) {
       if (okFour(results[h] && results[h].four)) { merged[h] = results[h]; anyOk = true; }
       else if (okFour(prev[h] && prev[h].four)) merged[h] = prev[h];
       else if (okFour(prevDay[h] && prevDay[h].four)) merged[h] = Object.assign({}, prevDay[h], { staleDay: true });

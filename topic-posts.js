@@ -119,6 +119,7 @@ async function genOne(point, material) {
 }
 
 (async () => {
+  if (fs.existsSync(path.join(STATE_DIR, 'PAUSE-' + ACCOUNT))) { console.error('PAUSE-' + ACCOUNT + ' 生效，账号级人工接管，退出'); process.exit(0); }
   if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { console.error('PAUSE 生效，退出'); process.exit(0); }
   LOG(`互关帖预制启动（@${ACCT.handle}，${TC.points.join('/')}`);
   const material = await collectMaterial().catch((e) => { LOG('参考池抓取失败: ' + e.message.slice(0, 60)); return null; });

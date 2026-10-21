@@ -35,6 +35,7 @@ function usedToday(type) { const cut = new Date(); cut.setHours(0, 0, 0, 0); ret
 const quota = () => { const h = new Date().getHours(); const [d, e] = [8, 22]; return (h >= d && h < e) ? (RC.cloudDayHourMax != null ? RC.cloudDayHourMax : 2) : (RC.cloudNightHourMax != null ? RC.cloudNightHourMax : 1); };
 
 (async () => {
+  if (fs.existsSync(path.join(STATE_DIR, 'PAUSE-' + ACCOUNT))) { console.error('PAUSE-' + ACCOUNT + ' 生效，账号级人工接管，退出'); process.exit(0); }
   if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { console.error('PAUSE 生效，退出'); process.exit(0); }
   // ① 拉取
   const pull = spawnSync(process.execPath, [path.join(ROOT, 'content-pull.js'), '--account=' + ACCOUNT], { cwd: ROOT, stdio: 'pipe', env: { ...process.env, NODE_EXTRA_CA_CERTS: path.join(ROOT, 'x-daily-cert.pem') } });

@@ -228,6 +228,7 @@ if (WATCHDOG) {
 
 // ══ 主流程 ══
 (async () => {
+  if (fs.existsSync(path.join(STATE_DIR, 'PAUSE-' + ACCOUNT))) { console.error('PAUSE-' + ACCOUNT + ' 生效（账号级人工接管），退出'); process.exit(0); } // 10-21：账号级暂停旗标，任何调度路径复活都在此立即退出（schtasks 禁用态漏火的釜底抽薪）
   if (!ACCT) { console.error('config.accounts 无此账号'); process.exit(1); }
   if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { console.error('PAUSE 生效，退出'); process.exit(0); }
   const led = loadLedger();
