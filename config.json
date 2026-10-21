@@ -62,18 +62,6 @@
     "postsPerTargetPerDay": 2,
     "pollFailStop": 5,
     "maintainers": {
-      "butcher": {
-        "targets": [
-          "wcixot",
-          "fullwin",
-          "owen"
-        ],
-        "actions": [
-          "like",
-          "reply"
-        ],
-        "fixed": "p2,p3"
-      },
       "wcixot": {
         "targets": [
           "butcher",
@@ -88,7 +76,7 @@
       }
     },
     "quotaNote": "10-20 拍板（kimi 复核建议+用户按推荐跑）：postsPerTargetPerDay=2/目标/天按维护号分账（butcher、wcixot 各自独立额度，不共享不挤占）；同帖去重仍全局（一帖只一号互动，v1.1 M3 防协同保留）；上限语义=每目标最多 2 帖/号/天×2 号=4 帖/天（低于 perTargetDailyCap 5）",
-    "matrixNote": "10-20 拍板：定投神（maccostin）退出自动化未接入；互维护矩阵=butcher→(wcixot,fullwin,owen)、wcixot→(butcher,fullwin,owen)；3N 保险丝 N=2→6",
+    "matrixNote": "10-21 更新：butcher 转常驻形态看齐 fullwin，退出维护矩阵；矩阵剩 wcixot→(butcher,fullwin,owen)（wcixot 人工期停摆中）",
     "replyProbability": 0.3333,
     "perPostRingCap": 2,
     "likeProbability": 0.8,
@@ -595,6 +583,78 @@
       "postCapDay": 50,
       "followCapDay": 100,
       "note": "10-20 终版：24小时制（23:59 自灭 00:05 接替）；云帖全天每小时:50 拉（上游每小时:40 出文），白天≤2条/时 夜里(22-8)1条/时，余量写回下小时消费；同作者每轮≤1；回复无总量帽（10-20 拍板），单用户≤3条/天（光速+巡逻合并计）；LLM=mimo；帖帽50；光速回复≤20字（拍板）；云帖调度化（cloud-posts.js，常驻不再管）；10-20 深夜拍板：7x24h 全勤（互动不再限 8-22），LLM=mimo 主 + ali(阿里 qwen3.8-flash) 兜底",
+      "patrolPostGapSec": [
+        25,
+        60
+      ],
+      "interactionHours": [
+        0,
+        24
+      ],
+      "cloudPullMinute": 50,
+      "cloudDayHourMax": 2,
+      "cloudNightHourMax": 1,
+      "perUserReplyCapDay": 3,
+      "replyMaxLen": 10,
+      "topicPosts": {
+        "enabled": true,
+        "genAt": "05:50",
+        "points": [
+          6,
+          8,
+          10,
+          12,
+          14,
+          16,
+          18,
+          20,
+          22,
+          24
+        ],
+        "jitterMin": 45,
+        "note": "10-20 拍板：全程预制——05:50 深滚 #蓝V互关 抓 24h 参考池，mimo 成批生成 10 条（分时段语气），整点±0~45min 定时发布；替代常驻页3"
+      },
+      "cloudScheduler": true,
+      "llmFallback": "ali",
+      "replyLenNote": "10-21 拍板（用户实测自己 16 条手动回复：平均 8.9 字/中位 8/全部≤20字/69%≤10字）：光速回复硬限 ≤10 字，20 字=长回复例外",
+      "greetHardLen": 12,
+      "lightHardLen": 20,
+      "lenNote": "10-21 codex 裁决版 B（用户拍板）：招呼≤12 硬门 / 轻内容≤20 硬门 / 实质提问转人工待办队列（human-todo-<账号>.json，进飞书报告）"
+    },
+    "butcher": {
+      "startHour": 0,
+      "endHour": 24,
+      "replyPollMin": 5,
+      "replyDelayMin": [
+        0.5,
+        3
+      ],
+      "patrolTopic": "蓝V互关",
+      "patrolGapMin": [
+        8,
+        15
+      ],
+      "patrolPerRound": 4,
+      "postGapMin": [
+        60,
+        85
+      ],
+      "postTags": [
+        "#蓝V互关",
+        "#蓝朋友",
+        "#浇朋友",
+        "#浇个朋友",
+        "#交个朋友",
+        "#交朋友"
+      ],
+      "cloudGapMin": [
+        2,
+        8
+      ],
+      "llmChannel": "mimo",
+      "postCapDay": 50,
+      "followCapDay": 100,
+      "note": "10-21 拍板：butcher 全管线看齐 fullwin（窗制退役）。克隆 fullwin 终版：光速回复(5min·限长10字·单用户≤3/天)+巡逻(#蓝V互关 8-15min/轮·≤4条·先关注后回复·无日帽)+互关帖(topic-posts 预制 05:50 十条整点发)+云帖(cloud-posts 每小时:50)；7x24 常驻+看门狗；LLM=mimo+ali 兜底",
       "patrolPostGapSec": [
         25,
         60

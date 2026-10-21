@@ -289,7 +289,7 @@ if (WATCHDOG) {
   const IH = RC.interactionHours || [8, 22];
   const topicOff = !!(RC.topicPosts && RC.topicPosts.enabled); // 10-20：互关帖改预制定时发布（topic-posts.js），常驻页3功能下线
   const userReplyCount = (author) => { st.userReplies = st.userReplies || {}; return (st.userReplies[(author || '').toLowerCase()] || 0); };
-  const userReplyIncr = (author) => { st.userReplies = st.userReplies || {}; const a = (author || '').toLowerCase(); st.userReplies[a] = (st.userReplies[a] || 0) + 1; saveSt(st); };
+  const userReplyIncr = (author) => { st.userReplies = st.userReplies || {}; st.userRepliesTotal = st.userRepliesTotal || {}; const a = (author || '').toLowerCase(); st.userReplies[a] = (st.userReplies[a] || 0) + 1; st.userRepliesTotal[a] = (st.userRepliesTotal[a] || 0) + 1; saveSt(st); }; // Total 跨日不重置（关系分级用）
   const userCapOk = (author) => userReplyCount(author) < (RC.perUserReplyCapDay != null ? RC.perUserReplyCapDay : 3);
   // 防复读历史（10-21 修复：三处 history 恒空致相似度防线断线；环形缓冲 100 条，范本 planner.js）
   const pushReplyHistory = (text) => { st.replyHistory = st.replyHistory || []; st.replyHistory.push(String(text).slice(0, 120)); if (st.replyHistory.length > 100) st.replyHistory = st.replyHistory.slice(-100); saveSt(st); };
@@ -340,7 +340,7 @@ if (WATCHDOG) {
           return { href: link ? link.getAttribute('href') : null, author: nameEl ? (nameEl.getAttribute('href') || '').replace('/', '').split('/')[0] : null, txt: (textEl ? (textEl.textContent || '') : '').replace(/\s+/g, ' ').trim().slice(0, 200) };
         });
       }).catch(() => []);
-      let queued = 0, replyish = 0, greetTpl = 0;
+      let queued = 0, replyish = 0, greetTpl = 0, bioFetchesThisRound = 0; // 每轮重置（10-21 补修②）
       for (const it of items) {
         if (!it.href || !it.author) continue;
         // 分类=关键词正则 ∪ 结构判定（语言无关：回复/提及的链接指向【别人】的帖；赞/关注指向我们的帖或无帖链接——10-20 用户截图实证通知页为中文，且此前抓取层静默为零，结构判定兜底防再瞎）
@@ -376,8 +376,10 @@ if (WATCHDOG) {
         }
         const scene = isGreet ? 'greet' : 'light';
         // ── 批2（10-21）：greet 走模板库（0 LLM=真光速）+ 身份标签（bio 缓存 7 天，未命中惰性抓一次） ──
+        // 10-21 补修②：bio 抓取每轮上限 2 个（无上限会阻塞轮询 25-50s=队列饥饿复发；超限本轮用无标签模板，下轮再抓）
         let greetLabel = cachedLabel(ACCOUNT, it.author) || null;
-        if (!greetLabel) {
+        if (!greetLabel && bioFetchesThisRound < 2) {
+          bioFetchesThisRound++;
           try {
             greetLabel = await withTempPage(browser, async (pg) => {
               await pg.goto('https://x.com/' + it.author, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
@@ -402,7 +404,8 @@ if (WATCHDOG) {
           // 模板耗尽/未过门→落 LLM 兜底（走下方生成路径）
         }
         const hardCap = scene === 'greet' ? (RC.greetHardLen || 12) : (RC.lightHardLen || 20);
-        const rel = userReplyCount(it.author) >= 3 ? '熟人（可镜像反捧、开轻玩笑）' : userReplyCount(it.author) >= 1 ? '眼熟（可加社区黑话和 emoji）' : '陌生人（客气短句，不玩梗不称兄道弟）';
+        const totalN = ((st.userRepliesTotal || {})[(it.author || '').toLowerCase()] || 0);
+        const rel = totalN >= 5 ? '老熟人（可镜像反捧、开轻玩笑、称兄道弟）' : totalN >= 2 || userReplyCount(it.author) >= 1 ? '眼熟（可加社区黑话和 emoji）' : '陌生人（客气短句，不玩梗不称兄道弟）'; // 10-21 补修④：累计跨日+当天并行
         const target = scene === 'greet' ? `4-10 个字，像手机上顺手回的一句${greetLabel ? '（对方是' + greetLabel + '，可带上称呼）' : ''}；对方是${rel}` : `8-16 个字，一句话点到对方说的具体内容；对方是${rel}`;
         // 超长硬拒→重生成一次（保留原意压到上限，不是硬缩到极短）→仍超跳过
         // 10-21 bug3 修复：history 接真实环形缓冲（原恒空致防复读断线）；casual=true 放行无标点短句
