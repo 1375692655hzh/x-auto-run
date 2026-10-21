@@ -9,7 +9,8 @@ const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { generateReply } = require('./llm');
+const { generateReply, judgeWorthiness } = require('./llm');
+const { pickGreet, cachedLabel, storeBio } = require('./interaction');
 const quality = require('./quality');
 
 const ROOT = __dirname;
@@ -134,6 +135,11 @@ async function replyOnPage(page, statusId, postUrl, text) {
   await sleep(rand(3000, 6000));
   const art = await findArticleByStatus(page, statusId);
   if (!art) return { ok: false, note: '未找到目标帖' };
+  // 读帖停顿（10-21 批3）：按原帖字数停——短帖 2-4s / 长帖 5-9s，加一次轻滚（WeClone'时机'思想）
+  const srcLen = (entry && entry.srcLen) || 40;
+  const dwellMs = srcLen > 100 ? rand(5000, 9000) : rand(2000, 4000);
+  await page.evaluate(() => window.scrollBy({ top: 200 + Math.floor(Math.random() * 200), behavior: 'smooth' })).catch(() => {});
+  await sleep(dwellMs);
   const btn = await art.$(SEL.reply);
   if (!btn) return { ok: false, note: '回复按钮未找到' };
   await humanClick(page, btn);
@@ -334,7 +340,7 @@ if (WATCHDOG) {
           return { href: link ? link.getAttribute('href') : null, author: nameEl ? (nameEl.getAttribute('href') || '').replace('/', '').split('/')[0] : null, txt: (textEl ? (textEl.textContent || '') : '').replace(/\s+/g, ' ').trim().slice(0, 200) };
         });
       }).catch(() => []);
-      let queued = 0, replyish = 0;
+      let queued = 0, replyish = 0, greetTpl = 0;
       for (const it of items) {
         if (!it.href || !it.author) continue;
         // 分类=关键词正则 ∪ 结构判定（语言无关：回复/提及的链接指向【别人】的帖；赞/关注指向我们的帖或无帖链接——10-20 用户截图实证通知页为中文，且此前抓取层静默为零，结构判定兜底防再瞎）
@@ -369,11 +375,38 @@ if (WATCHDOG) {
           continue;
         }
         const scene = isGreet ? 'greet' : 'light';
+        // ── 批2（10-21）：greet 走模板库（0 LLM=真光速）+ 身份标签（bio 缓存 7 天，未命中惰性抓一次） ──
+        let greetLabel = cachedLabel(ACCOUNT, it.author) || null;
+        if (!greetLabel) {
+          try {
+            greetLabel = await withTempPage(browser, async (pg) => {
+              await pg.goto('https://x.com/' + it.author, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+              await sleep(1500);
+              return pg.evaluate(() => { const el = document.querySelector('[data-testid="UserDescription"]'); return el ? el.textContent.trim().slice(0, 160) : ''; }).catch(() => '');
+            });
+            greetLabel = greetLabel ? storeBio(ACCOUNT, it.author, greetLabel) : null;
+          } catch { greetLabel = null; }
+        }
+        if (scene === 'greet') {
+          const recentSet = new Set((st.replyHistory || []).slice(-24).concat((st.pendingInbox || []).map((x) => x.text)));
+          const tmpl = pickGreet(greetLabel, recentSet);
+          if (tmpl) {
+            const tc = quality.check(tmpl, { casual: true, history: st.replyHistory || [] });
+            if (tc.ok && [...tc.cleaned].length <= (RC.greetHardLen || 12)) {
+              sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: tc.cleaned, sendAt: Date.now() + rand(...(scene === 'greet' ? [0.5, 1.5] : [1.5, 5])) * 60000 });
+              st.pendingInbox = (st.pendingInbox || []).concat([{ statusId, postUrl, author: it.author, text: tc.cleaned, sendAt: sendQueue[sendQueue.length - 1].sendAt }]);
+              st.seenNotifs[key] = nowIso(); saveSt(st); queued++; greetTpl++;
+              continue; // 模板路径结束，不走 LLM
+            }
+          }
+          // 模板耗尽/未过门→落 LLM 兜底（走下方生成路径）
+        }
         const hardCap = scene === 'greet' ? (RC.greetHardLen || 12) : (RC.lightHardLen || 20);
-        const target = scene === 'greet' ? '4-10 个字，像手机上顺手回的一句' : '8-16 个字，一句话点到对方说的具体内容';
+        const rel = userReplyCount(it.author) >= 3 ? '熟人（可镜像反捧、开轻玩笑）' : userReplyCount(it.author) >= 1 ? '眼熟（可加社区黑话和 emoji）' : '陌生人（客气短句，不玩梗不称兄道弟）';
+        const target = scene === 'greet' ? `4-10 个字，像手机上顺手回的一句${greetLabel ? '（对方是' + greetLabel + '，可带上称呼）' : ''}；对方是${rel}` : `8-16 个字，一句话点到对方说的具体内容；对方是${rel}`;
         // 超长硬拒→重生成一次（保留原意压到上限，不是硬缩到极短）→仍超跳过
         // 10-21 bug3 修复：history 接真实环形缓冲（原恒空致防复读断线）；casual=true 放行无标点短句
-        const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人回应对方；回复 ${target}。`;
+        const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人回应对方；回复 ${target}。风格参考（只学节奏不复用内容）：真人回复像随手打的——'哈哈，互相学习' '来了兄弟' '确实，这波我认'——口语、短促、不书面、不总结。`;
         let r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: recentHistory(), channel: RC.llmChannel, maxLen: hardCap, fallbackProvider: RC.llmFallback }).catch(() => null);
         let qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [], casual: true }) : null;
         if (qc && qc.ok && visLen(qc.cleaned) > hardCap) {
@@ -390,7 +423,7 @@ if (WATCHDOG) {
         } else { audit({ action: 'replyGen', note: `@${it.author} 生成未过门(${qc ? qc.reason : 'LLM失败'})` }); st.seenNotifs[key] = nowIso(); saveSt(st); }
       }
       // 观测日志（10-20：全天 0 产出却零日志的教训）——每轮都记录看到什么
-      LOG(`页1：通知 ${items.length} 条 / 回复类 ${replyish} / 新入队 ${queued}`);
+      LOG(`页1：通知 ${items.length} 条 / 回复类 ${replyish} / 新入队 ${queued}（模板 ${greetTpl}/LLM ${queued - greetTpl}）`);
       if (items.length && !queued) audit({ action: 'inboxPoll', note: `通知${items.length}/回复类${replyish}/入队0`, sample: items.slice(0, 2).map((i) => (i.txt || '').slice(0, 40)).join(' || ') });
     } catch (e) { LOG('页1 轮询异常: ' + String(e.message).slice(0, 60)); }
   }
@@ -420,6 +453,9 @@ if (WATCHDOG) {
       for (const p of take) {
         if (aborted) break; // 回复总量帽已拆（10-20 拍板'回复不需要帽子'）；单用户上限见 userReplyCount
         if (!userCapOk(p.author)) { audit({ action: 'patrolSkip', target: p.author, note: '单用户回复上限' }); continue; }
+        // 价值预判（10-21 批3②）：灌水帖不硬凑
+        const worth = await judgeWorthiness({ post: p.text, author: p.author }).catch(() => '值');
+        if (worth === '不值') { audit({ action: 'patrolSkip', target: p.author, note: '价值预判：灌水/零信息' }); continue; }
         const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注、常来往（不要声称已关注）。', history: recentHistory(), channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
         const qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [] }) : null;
         if (!(qc && qc.ok)) { audit({ action: 'patrolGen', target: p.author, note: `生成未过门(${qc ? qc.reason : 'LLM失败'})，跳过` }); continue; }

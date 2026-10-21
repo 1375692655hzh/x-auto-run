@@ -78,4 +78,12 @@ async function generateReply({ post, author, persona, brief, history = [], chann
   return chat({ messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.9, maxTokens: 256, provider: channel, fallbackProvider });
 }
 
-module.exports = { chat, generateReply };
+/** 价值预判（10-21 批3，social-bot 机制）：这条巡逻候选帖值不值得我们回——灌水/纯表情/零信息帖不硬凑 */
+async function judgeWorthiness({ post, author }) {
+  const system = '你是 X 互关社区的帖子筛选器。判断这条帖子值不值得一个认真做交易的博主去评论。标准：有具体内容或明确互关意图=值得；纯表情/单字灌水/无意义字符=不值得。只输出一个字：值 或 不值';
+  const r = await chat({ messages: [{ role: 'system', content: system }, { role: 'user', content: `@${author}: ${String(post).slice(0, 200)}` }], maxTokens: 8, provider: 'mimo', noFallback: true }).catch(() => null);
+  if (!r || !r.text) return '值'; // 预判失败=放行（宁多回不漏回）
+  return /不/.test(r.text.trim()) ? '不值' : '值';
+}
+
+module.exports = { chat, generateReply, judgeWorthiness };
