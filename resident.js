@@ -130,7 +130,7 @@ async function findArticleByStatus(page, statusId) {
   }
   return null;
 }
-async function replyOnPage(page, statusId, postUrl, text) {
+async function replyOnPage(page, statusId, postUrl, text, entry) {
   if (!(await gotoFeed(page, postUrl))) return { ok: false, note: '页面加载失败' };
   await sleep(rand(3000, 6000));
   const art = await findArticleByStatus(page, statusId);
@@ -465,7 +465,7 @@ if (WATCHDOG) {
         if (DRY) { LOG(`[DRY] 应评论 @${p.author}: ${qc.cleaned.slice(0, 30)}…`); continue; }
         // 动作隔离（10-20 用户建议）：每个动作独立临时页+用完即关，与搜索页状态彻底解耦；瞬态错误重试一次
         const postUrl = 'https://x.com' + (p.link || ('/i/web/status/' + p.id));
-        let rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned)));
+        let rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned, { srcLen: [...(p.text || '')].length })));
         if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(p.author); pushReplyHistory(qc.cleaned); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
         else audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: 'failed', note: rr.note });
         if (rr.ok && usedToday('follow') < RC.followCapDay) {
@@ -580,7 +580,7 @@ if (WATCHDOG) {
           // 10-21 bug2 修复：风控 toast 在临时页上读（原查 pageReply 常驻页=永远读不到，风控信号漏检）；
           // 成功/不明都写回复历史（防复读），并从持久化待发里移除（bug5 配套）
           const rr = await withTempPage(browser, async (pg) => {
-            const r2 = await retryTransient(() => replyOnPage(pg, q.statusId, q.postUrl, q.text));
+            const r2 = await retryTransient(() => replyOnPage(pg, q.statusId, q.postUrl, q.text, { srcLen: [...(q.srcText || '')].length }));
             const risk = await riskToast(pg).catch(() => null); // 页关前读走 toast
             return { ...r2, risk };
           }).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
