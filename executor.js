@@ -239,9 +239,13 @@ async function findArticleByStatus(page, statusId) {
 // 按 statusId 定位目标帖再回复（不取 arts[0]——审计指出的坑）
 async function replyToPost(page, entry) {
   if (!(await gotoFeed(page, entry.postUrl))) return { ok: false, note: '页面加载失败' };
-  await gsleep(CFG.pacing.readDwellGaussMs);
+  // 10-21 P1-⑤：读帖停顿∝原帖字数（fullwin 真人节奏移植）——短帖扫一眼、长帖读完，150 字封顶 ×2.2
+  const dwellF = entry.targetLen ? Math.min(2.2, 0.6 + entry.targetLen / 150) : 1;
+  await gsleep([CFG.pacing.readDwellGaussMs[0] * dwellF, CFG.pacing.readDwellGaussMs[1] * dwellF]);
   const art = await findArticleByStatus(page, entry.statusId);
   if (!art) return { ok: false, note: '按 statusId 未找到目标帖' };
+  // 带媒体帖不回（10-20 拍板全局规则；10-21 云端池候选无媒体字段，池路径在 executor 层兜底复查）
+  if (await art.evaluate((el) => !!el.querySelector('[data-testid="tweetPhoto"], [data-testid="videoPlayer"]')).catch(() => false)) return { ok: false, note: '带媒体帖不回（10-20 拍板）' };
   const btn = await art.$(SEL.reply);
   if (!btn) return { ok: false, note: '回复按钮未找到' };
   await humanClick(page, btn);
@@ -555,6 +559,10 @@ function executeAction(page, entry) {
       // 关注幂等（10-18 条件回关）：实际已关注过的人按钮不出现，算完成不计失败（防误触连续失败熔断）
       else if (e.type === 'follow' && /可能已关注/.test(r.note || '')) {
         e.status = 'done'; e.result = '已关注过（幂等）'; done += 1; stats.executed.push(e.id);
+      }
+      // 带媒体帖不回=目标侧原因，跳过不计失败（10-20 拍板；10-21 池路径 executor 层兜底）
+      else if (/带媒体帖不回/.test(r.note || '')) {
+        e.status = 'skipped'; e.result = '带媒体帖不回（10-20 拍板·执行层复查）: ' + (r.note || ''); stats.skipped.push(e.id);
       }
       // 权重维护（v1.1 M6）：目标帖不可见/已删是目标侧原因，跳过不计失败熔断
       else if (e.kind === 'maintain' && /未找到目标帖|页面加载失败/.test(r.note || '')) {

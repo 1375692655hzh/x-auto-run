@@ -1,16 +1,19 @@
-// inbox-reply.js — 被动回复模块（2026-10-21 用户拍板"开工"，补 butcher/才女 最后一个零代码缺口）：
-// 别人在我们帖下的评论 → 提及页轮询 → LLM 生成 → 回复对方那条评论。
-// 用法: node inbox-reply.js --account butcher [--dry]
-// 调度: schtasks Xops被动回复-butcher/才女 每 30 分钟（脚本内守 07:00-22:00——07 点是互关帖早槽的评论高峰接续，本任务自带时段授权不走 executor 9-22 窗闸）。
-// 规则: 自家矩阵号不回；同状态不重复回（seenNotifs）；单用户 ≤3 条/天（与 fullwin 同规）；每轮 ≤10 条；
-//       只回复不关注（回关归条件回关机制）；不声称"已关注"（防虚假表述）；unknown 不重试（评论重复比漏回更糟，留核验）。
-// 刹车: PAUSE / ledger.meta.abortedToday 风控当日锁 / 最新健康快照 suspended·敏感>0。
-// 账本: 与 executor 共用 ledger-<account>.json 滚动 24h（reply 帽 60）；回复记录回写 taskstate+contacts（planner 去重与关系池不失真）。
+// inbox-reply.js — 被动回复模块 v2（10-21 用户拍板"跟进"，移植 fullwin 光速回复 v3 全套方法论，保持轮询形式）：
+// 别人在我们帖下的评论 → 提及页轮询 → 分场景处理 → 回复对方那条评论。
+// v2 相比 v1（10-21 上午版）吸收的 fullwin 成果：
+//   ①分场景双阈值（招呼≤12字素 / 轻内容≤20字素，codex 裁决版 B）②实质提问→人工待办（human-todo-<账号>.json，进飞书报告）
+//   ③quality casual 档（放行无标点短句/社区招呼词）④招呼模板库 0-LLM（interaction.js）+bio 惰性抓取≤2/轮+身份标签
+//   ⑤history 接 taskstate 真实缓冲（防复读）⑥关系分级累计制（userRepliesTotal 跨日不清：≥5 老熟人/≥2 眼熟/陌生）
+//   ⑦字素级长度口径（emoji 不算 2）⑧超长硬拒→保留原意重生成一次→仍超跳过留痕
+// 用法: node inbox-reply.js --account wcixot [--dry]
+// 调度: Xops被动回复-才女 每 15 分钟（10-21 P1 提速拍板；脚本内守 07:00-22:00）。
+// 刹车: PAUSE / 风控当日锁 / 健康快照；账本与 executor 共用（reply 帽 60）；只回复不关注；矩阵号不回。
 const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 const { generateReply } = require('./llm');
 const quality = require('./quality');
+const { pickGreet, cachedLabel, storeBio } = require('./interaction');
 
 const ROOT = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
@@ -22,9 +25,9 @@ const DRY = argv.includes('--dry');
 if (!ACCOUNT) { console.error('用法: node inbox-reply.js --account <key> [--dry]'); process.exit(1); }
 const ACCT = CFG.accounts.find((a) => a.key === ACCOUNT);
 if (!ACCT) { console.error('config.accounts 无此账号: ' + ACCOUNT); process.exit(1); }
-const OWN = new Set(CFG.accounts.map((a) => a.handle.toLowerCase())); // 自家矩阵号不自动回（用户手动管）
-const HOURS = [7, 22]; // 本任务授权时段（10-21 拍板：接续互关帖 07:00 早槽评论高峰）
-const PER_USER_DAY = 3, PER_RUN = 10;
+const IR = Object.assign({ greetHardLen: 12, lightHardLen: 20, perUserDay: 3, perRun: 10, hours: [7, 22] }, (CFG.inboxReply || {})[ACCOUNT] || {});
+const OWN = new Set(CFG.accounts.map((a) => a.handle.toLowerCase())); // 自家矩阵号不自动回
+const visLen = (s) => [...String(s)].length; // 字素级长度（emoji 不算 2，10-21 codex 口径）
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -32,10 +35,11 @@ const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(
 const log = (line) => { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: new Date().toISOString(), task: 'inboxReply', account: ACCOUNT, ...line }) + '\n'); };
 const nowIso = () => new Date().toISOString();
 
-// ── 状态（seenNotifs 去重 + 单用户日帽） ──
+// ── 状态：seenNotifs 去重（五出口标记，不在生成前标）+ 单用户日帽 + 关系累计制 ──
 const ST_FILE = path.join(STATE_DIR, `inbox-${ACCOUNT}.json`);
-function loadSt() { try { return { seenNotifs: {}, perUser: { date: today(), counts: {} }, ...JSON.parse(fs.readFileSync(ST_FILE, 'utf8')) }; } catch { return { seenNotifs: {}, perUser: { date: today(), counts: {} } }; } }
+function loadSt() { try { return { seenNotifs: {}, perUser: { date: today(), counts: {} }, userRepliesTotal: {}, ...JSON.parse(fs.readFileSync(ST_FILE, 'utf8')) }; } catch { return { seenNotifs: {}, perUser: { date: today(), counts: {} }, userRepliesTotal: {} }; } }
 function saveSt(st) { const ks = Object.keys(st.seenNotifs); if (ks.length > 500) for (const k of ks.slice(0, ks.length - 500)) delete st.seenNotifs[k]; fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(ST_FILE, JSON.stringify(st, null, 2)); }
+function histAll() { try { return JSON.parse(fs.readFileSync(path.join(STATE_DIR, `taskstate-${ACCOUNT}.json`), 'utf8')).replyHistory || []; } catch { return []; } }
 
 // ── 刹车门（与 executor/mutual-post 同语义） ──
 function gate() {
@@ -50,7 +54,7 @@ function gate() {
       if (e) return null;
     } catch { }
   }
-  return null; // 无快照=unknown≠异常，照常
+  return null;
 }
 
 // ── 滚动账本（reply 帽 60 与 executor 共用） ──
@@ -63,8 +67,6 @@ function loadLedger() {
 }
 const replyCap = () => (((CFG.executor || {}).rollingCaps || {}).reply) || 60;
 function ledgerRecordReply() { const led = loadLedger(); (led.actions.reply = led.actions.reply || []).push(Date.now()); fs.writeFileSync(path.join(STATE_DIR, `ledger-${ACCOUNT}.json`), JSON.stringify(led, null, 2)); }
-
-// ── 台账回写（与 executor 同口径：planner 去重 + 关系池不失真） ──
 function recordReply(entry) {
   try {
     const p = path.join(STATE_DIR, `taskstate-${ACCOUNT}.json`);
@@ -104,8 +106,13 @@ async function lockWait() {
 }
 const unlock = (f) => { try { fs.unlinkSync(f); } catch { } };
 
-// ── 回复对方那条评论（executor.replyToPost 同流程，按其 statusId 定位再回） ──
+// ── 回复对方那条评论（executor.replyToPost 同流程）+ 临时页 bio 抓取 ──
 const SEL = { article: 'article[data-testid="tweet"]', reply: '[data-testid="reply"]', replyBox: '[data-testid="tweetTextarea_0"]', toast: '[data-testid="toast"]' };
+async function withTempPage(browser, fn) {
+  const pg = await browser.newPage();
+  pg.on('dialog', (d) => d.accept().catch(() => { }));
+  try { return await fn(pg); } finally { try { await pg.close(); } catch { } }
+}
 async function replyToComment(page, postUrl, statusId, text) {
   try { await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); await page.waitForSelector(SEL.article, { timeout: 45000 }); }
   catch { return { ok: false, note: '页面加载失败' }; }
@@ -144,20 +151,22 @@ async function replyToComment(page, postUrl, statusId, text) {
   }).catch(() => false);
   if (!clicked) return { ok: false, note: '提交按钮不可点' };
   const okToast = (t) => /已发送|发过了|送信|already|posted|sent/i.test(t || '');
+  let lastToast = null;
   for (let i = 0; i < 30; i++) {
     await sleep(500);
     const st = await page.evaluate(() => { const box = document.querySelector('[data-testid="tweetTextarea_0"]'); return { dlg: !!document.querySelector('[role="dialog"]'), toast: ((document.querySelector('[data-testid="toast"]') || {}).textContent || '').trim(), boxLen: box && box.textContent ? box.textContent.length : 0 }; }).catch(() => null);
     if (!st) continue;
+    lastToast = st.toast;
     if (okToast(st.toast)) return { ok: true };
     if (hasDialog && !st.dlg) return { ok: false, unknown: true, note: '弹窗关闭未见气泡' };
     if (!hasDialog && st.boxLen === 0) return { ok: false, unknown: true, note: '输入框已清空未见气泡' };
   }
-  return { ok: false, note: '超时未见成功气泡' };
+  return { ok: false, note: '超时未见成功气泡' + (lastToast ? '（末气泡:' + lastToast.slice(0, 20) + '）' : '') };
 }
 
 (async () => {
   const hour = new Date().getHours();
-  if (hour < HOURS[0] || hour >= HOURS[1]) { console.log(`非授权时段(${HOURS[0]}-${HOURS[1]})，退出`); process.exit(0); }
+  if (hour < IR.hours[0] || hour >= IR.hours[1]) { console.log(`非授权时段(${IR.hours[0]}-${IR.hours[1]})，退出`); process.exit(0); }
   const g = gate();
   if (g) { console.log('刹车：' + g); log({ action: 'skip', note: g }); process.exit(0); }
   const led0 = loadLedger();
@@ -167,16 +176,15 @@ async function replyToComment(page, postUrl, statusId, text) {
 
   const lockF = DRY ? null : await lockWait();
   let browser = null, ws = null;
-  const stats = { seen: 0, fresh: 0, replied: 0, failed: 0, skippedOwn: 0, skippedCap: 0 };
+  const stats = { seen: 0, fresh: 0, replied: 0, failed: 0, skippedOwn: 0, skippedCap: 0, todo: 0, greetTpl: 0 };
   try {
     const oj = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).then((r) => r.json());
     if (!oj.success) throw new Error('开窗失败: ' + JSON.stringify(oj));
     ws = oj.data.ws;
     browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null, protocolTimeout: 300000 });
     const page = await browser.newPage();
-    page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框自动点离开（10-20 全天 CDP 超时真凶）
+    page.on('dialog', (d) => d.accept().catch(() => { })); // 防丢草稿模态框（10-20 真凶）
     await page.setViewport({ width: 1400 + Math.floor(Math.random() * 120), height: 880 + Math.floor(Math.random() * 100) });
-    // 提及页（回复/提及类专用页；"全部"页被关注/点赞洪流淹没——fullwin 光速回复实证路径）
     await page.goto('https://x.com/notifications/mentions', { waitUntil: 'domcontentloaded', timeout: 60000 });
     let got = await page.waitForSelector(SEL.article, { timeout: 15000 }).then(() => true).catch(() => false);
     if (!got) { await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { }); got = await page.waitForSelector(SEL.article, { timeout: 15000 }).then(() => true).catch(() => false); }
@@ -193,54 +201,114 @@ async function replyToComment(page, postUrl, statusId, text) {
         });
       }).catch(() => []);
       stats.seen = items.length;
+      let bioFetches = 0; // bio 惰性抓取每轮 ≤2（fullwin 10-21 补修②：防队列饥饿）
+      const hist = histAll();
       for (const it of items) {
         if (!it.href || !it.author) continue;
-        // 分类=关键词正则 ∪ 结构判定（语言无关：回复/提及的链接指向【别人】的帖；赞/关注指向我们的帖或无帖链接）
         const isReplyMention = /回复|回覆|reply|返信|提到|mention|提及|メンション/i.test(it.txt)
           || !it.href.toLowerCase().includes('/' + ACCT.handle.toLowerCase() + '/');
         if (!isReplyMention) continue;
         if (OWN.has(it.author.toLowerCase())) { stats.skippedOwn++; continue; }
         const key = it.href + '|' + it.author.toLowerCase();
         const prev = st.seenNotifs[key];
-        if (prev && !(prev.status === 'genFail' && !prev.retried)) continue; // genFail 给一次重试机会（10-21 交付必达：质量门淘汰不丢量；其余终态不重试——评论重复比漏回糟）
+        if (prev && !(prev.status === 'genFail' && !prev.retried)) continue; // genFail 一次重试；其余终态
         if (prev) prev.retried = true;
-        if (stats.replied >= PER_RUN) break;
+        if (stats.replied >= IR.perRun) break;
         stats.fresh++;
         const statusId = (it.href.match(/status\/(\d+)/) || [])[1];
         if (!statusId) { st.seenNotifs[key] = { at: nowIso(), status: 'badlink' }; continue; }
-        if (!it.txt || it.txt.length < 2) { st.seenNotifs[key] = { at: nowIso(), status: 'empty' }; continue; } // 纯图/无字评论没有可回应的文本（10-21 拍板带媒体帖规则同延：看不懂的不回）
+        if (!it.txt || it.txt.length < 2) { st.seenNotifs[key] = { at: nowIso(), status: 'empty' }; continue; }
         const uc = st.perUser.counts[it.author.toLowerCase()] || 0;
-        if (uc >= PER_USER_DAY) { st.seenNotifs[key] = { at: nowIso(), status: 'userCap' }; stats.skippedCap++; log({ action: 'skip', target: it.author, note: '单用户日帽' }); continue; }
-        // LLM 生成（人设 + 入站语境 brief；40 字内随手回）
-        const brief = '对方在我们发的帖子下评论（互关帖或盘面帖）。作为楼主真诚、具体地回应一句；对方求互关/串门的自然欢迎常来往；不要声称已关注对方（回关由别的机制做）；不要话题标签不要@任何人；控制在 40 字以内，像随手回的真人，结尾要有标点。';
-        // 交付必达（10-21）：截断门在 ≤40 字随手回场景误杀率高（完整短句只是没句号）——
-        // ①补句号重验（仅当文本不像真截断：不以连接符/半个英文词结尾）②再失败换语气重生成一轮 ③仍败记 genFail 下轮再试一次
-        const tryGen = async () => {
-          const r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: [], maxLen: 40 }).catch((e) => { console.log('LLM 失败: ' + String(e.message).slice(0, 80)); return null; });
-          if (!r || !r.text) return null;
-          const qc = quality.check(r.text, {});
-          if (!qc.ok && /疑似截断/.test(qc.reason || '')) {
-            const t = qc.cleaned.trim();
-            if (!/[，,、；;：:…—\-~～(（]$/.test(t) && !/[a-zA-Z]$/.test(t)) { // 完整短句只是缺句号 → 补句号重验
-              const qc2 = quality.check(t + '。', {});
-              if (qc2.ok) return qc2;
+        if (uc >= IR.perUserDay) { st.seenNotifs[key] = { at: nowIso(), status: 'userCap' }; stats.skippedCap++; log({ action: 'skip', target: it.author, note: '单用户日帽' }); continue; }
+
+        // ── 分场景分类器（10-21 fullwin v3 移植，regex 含 codex 边界修正照抄） ──
+        const txt0 = (it.txt || '').replace(/^(@\w+\s*)+/, '').trim();
+        const hasQWord = /怎么|为什么|什么|哪|如何|能不能|是不是|讲讲|说说|分析|解释|止损|仓位|建议|看法|怎么看|什么渠道|怎么开/.test(txt0);
+        const hasQ = /[？?]/.test(txt0);
+        const isGreet = /来了|来咯|欢迎|大佬好|膜拜|互关|回关|关注你|关注了|已关注|回访|支持一波|报到|串门|顶|前排|围观|做大做强|兄弟|学习|不错|可以|强|牛|厉害|早上好|早安|晚安|好呀/.test(txt0) && visLen(txt0) <= 24 && !(hasQWord && (hasQ || visLen(txt0) > 10));
+        const isQuestion = (hasQWord && (hasQ || visLen(txt0) >= 6)) || /讲讲|说说|分析|解释/.test(txt0);
+        if (isQuestion) {
+          // 实质提问→人工待办（human-todo-<账号>.json，与 fullwin 常驻同构，进飞书"待你人工回复"段）
+          const todoFile = path.join(STATE_DIR, `human-todo-${ACCOUNT}.json`);
+          let todo = { pending: [] };
+          try { todo = JSON.parse(fs.readFileSync(todoFile, 'utf8')); if (!Array.isArray(todo.pending)) todo.pending = []; } catch { }
+          todo.pending.push({ at: nowIso(), author: it.author, text: txt0.slice(0, 120), postUrl: 'https://x.com' + it.href, statusId, status: 'pending' });
+          fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(todoFile, JSON.stringify(todo, null, 2));
+          st.seenNotifs[key] = { at: nowIso(), status: 'humanTodo' }; saveSt(st);
+          stats.todo++; log({ action: 'humanTodo', target: it.author, note: '实质提问转人工: ' + txt0.slice(0, 30) });
+          console.log(`📋 转人工待办 @${it.author}: ${txt0.slice(0, 30)}`);
+          continue;
+        }
+        const scene = isGreet ? 'greet' : 'light';
+        // bio 惰性抓取（缓存 7 天 interaction.js 管；本轮 ≤2）
+        let greetLabel = cachedLabel(ACCOUNT, it.author) || null;
+        if (!greetLabel && bioFetches < 2 && !DRY) {
+          bioFetches++;
+          try {
+            greetLabel = await withTempPage(browser, async (pg) => {
+              await pg.goto('https://x.com/' + it.author, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+              await sleep(1500);
+              return pg.evaluate(() => { const el = document.querySelector('[data-testid="UserDescription"]'); return el ? el.textContent.trim().slice(0, 160) : ''; }).catch(() => '');
+            });
+            greetLabel = greetLabel ? storeBio(ACCOUNT, it.author, greetLabel) : null;
+          } catch { greetLabel = null; }
+        }
+        // 招呼场景：模板库 0-LLM 真光速（quality casual 档 + 硬门校验）
+        if (scene === 'greet') {
+          const recentSet = new Set(hist.slice(-24));
+          const tmpl = pickGreet(greetLabel, recentSet);
+          if (tmpl) {
+            const tc = quality.check(tmpl, { casual: true, history: hist });
+            if (tc.ok && visLen(tc.cleaned) <= IR.greetHardLen) {
+              if (DRY) { console.log(`[DRY] 模板回复 @${it.author}: ${tc.cleaned}`); st.seenNotifs[key] = { at: nowIso(), status: 'dry' }; continue; }
+              await sleep(rand(500, 3000));
+              let rr = await replyToComment(page, 'https://x.com' + it.href, statusId, tc.cleaned).catch((e) => ({ ok: false, note: e.message }));
+              if (rr.ok) {
+                st.seenNotifs[key] = { at: nowIso(), status: 'done' };
+                st.perUser.counts[it.author.toLowerCase()] = uc + 1;
+                st.userRepliesTotal = st.userRepliesTotal || {}; st.userRepliesTotal[it.author.toLowerCase()] = (st.userRepliesTotal[it.author.toLowerCase()] || 0) + 1;
+                ledgerRecordReply(); recordReply({ targetHandle: it.author, statusId, text: tc.cleaned }); syncContactsReply({ targetHandle: it.author });
+                stats.replied++; stats.greetTpl++;
+                log({ action: 'execute', type: 'reply', kind: 'inbox', id: `inbox-${statusId}`, target: it.author, status: 'done', note: '模板', text: tc.cleaned.slice(0, 60) });
+                console.log(`✅[模板] 已回 @${it.author}: ${tc.cleaned}`);
+                saveSt(st); await sleep(rand(15000, 35000));
+                continue;
+              }
+              console.log(`❌[模板] 发送失败 @${it.author}: ${rr.note}，落 LLM 路径`);
+              log({ action: 'tplSendFail', target: it.author, note: rr.note });
             }
           }
-          return qc.ok ? qc : null;
+          // 模板耗尽/未过门/发送失败 → 落 LLM 兜底（走下方生成路径）
+        }
+        // ── LLM 生成（轻内容主路径；关系分级 brief + few-shot 节奏锚 + 超长重生成） ──
+        const hardCap = scene === 'greet' ? IR.greetHardLen : IR.lightHardLen;
+        const totalN = ((st.userRepliesTotal || {})[it.author.toLowerCase()] || 0);
+        const rel = totalN >= 5 ? '老熟人（可镜像反捧、开轻玩笑、称兄道弟）' : totalN >= 2 || uc >= 1 ? '眼熟（可加社区黑话和 emoji）' : '陌生人（客气短句，不玩梗不称兄道弟）';
+        const target = scene === 'greet'
+          ? `4-${IR.greetHardLen - 2} 个字，像手机上顺手回的一句${greetLabel ? '（对方是' + greetLabel + '，可带上称呼）' : ''}；对方是${rel}`
+          : `8-${IR.lightHardLen - 4} 个字，一句话点到对方说的具体内容；对方是${rel}`;
+        const brief = `这是一条对方发在我们帖子下的评论，作为楼主回应对方；回复 ${target}。风格参考（只学节奏不复用内容）：真人回复像随手打的——'哈哈，互相学习' '来了兄弟' '确实，这波我认'——口语、短促、不书面、不总结。`;
+        const tryGen = async (extra) => {
+          const r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief: brief + (extra || ''), history: hist.slice(-8), maxLen: hardCap }).catch((e) => { console.log('LLM 失败: ' + String(e.message).slice(0, 80)); return null; });
+          if (!r || !r.text) return null;
+          const qc = quality.check(r.text, { history: hist, casual: true });
+          return qc.ok ? qc : { ok: false, reason: qc.reason, cleaned: qc.cleaned };
         };
         let qc = await tryGen();
-        if (!qc) qc = await tryGen();
-        if (!qc) {
-          if (DRY) { console.log(`[DRY] 两轮生成未过门(@${it.author})，跳过`); continue; } // DRY 不写台账不标记
-          log({ action: 'genFail', target: it.author, note: '两轮生成未过门' });
+        if (qc && qc.ok && visLen(qc.cleaned) > hardCap) {
+          log({ action: 'replyLen', target: it.author, note: `${scene}超长${visLen(qc.cleaned)}字素重生成` });
+          qc = await tryGen(`上一版超长了，保留原意压缩到 ${hardCap} 字以内，压不了就别说。`);
+        }
+        if (qc && qc.ok && visLen(qc.cleaned) > hardCap) { log({ action: 'replyLen', target: it.author, note: `${scene}仍超长跳过(${visLen(qc.cleaned)}字素)` }); st.seenNotifs[key] = { at: nowIso(), status: 'tooLong' }; saveSt(st); continue; }
+        if (!qc || !qc.ok) {
+          if (DRY) { console.log(`[DRY] 生成未过门(@${it.author})，跳过`); continue; } // DRY 不写台账不标记
+          log({ action: 'genFail', target: it.author, note: qc ? qc.reason : 'LLM失败' });
           st.seenNotifs[key] = { at: nowIso(), status: 'genFail' }; saveSt(st); continue;
         }
-        if (DRY) { console.log(`[DRY] 应回复 @${it.author}（${statusId.slice(-6)}）: ${qc.cleaned}`); continue; } // DRY 不写 seenNotifs（10-21 实战：干跑标记曾把 22 条积压标成"已读"险致永不回）
-        await sleep(rand(500, 3000)); // 0.5-3s 小延迟（轮询本身已有 0-30min 自然延迟）
+        if (DRY) { console.log(`[DRY] 应回复 @${it.author}（${scene}）: ${qc.cleaned}`); st.seenNotifs[key] = { at: nowIso(), status: 'dry' }; continue; }
+        await sleep(rand(500, 3000));
         let rr = await replyToComment(page, 'https://x.com' + it.href, statusId, qc.cleaned).catch((e) => ({ ok: false, note: e.message }));
-        // 瞬态重试 1 次（与 executor 同思路）
         if (!rr.ok && !rr.unknown && /Protocol error|timed out|TimeoutError|net::|ERR_/i.test(rr.note || '')) { await sleep(8000); rr = await replyToComment(page, 'https://x.com' + it.href, statusId, qc.cleaned).catch((e) => ({ ok: false, note: e.message + '（重试后仍败）' })); }
-        // 风控 toast 刹车（唯一整轮刹车）
         const toast = await page.evaluate((sel) => { const t = document.querySelector(sel); return t ? (t.textContent || '').trim().slice(0, 80) : null; }, SEL.toast).catch(() => null);
         if (toast && /出错|稍后再试|无法|请重试|try again|something went wrong|limit|restrict|block/i.test(toast)) {
           const led = loadLedger(); led.meta = led.meta || {}; led.meta.abortedToday = today(); led.meta.abortReason = '风控toast(被动回复): ' + toast;
@@ -253,18 +321,19 @@ async function replyToComment(page, postUrl, statusId, text) {
         if (rr.ok) {
           st.seenNotifs[key] = { at: nowIso(), status: 'done' };
           st.perUser.counts[it.author.toLowerCase()] = uc + 1;
+          st.userRepliesTotal = st.userRepliesTotal || {}; st.userRepliesTotal[it.author.toLowerCase()] = (st.userRepliesTotal[it.author.toLowerCase()] || 0) + 1;
           ledgerRecordReply(); recordReply({ targetHandle: it.author, statusId, text: qc.cleaned }); syncContactsReply({ targetHandle: it.author });
           stats.replied++;
           log({ action: 'execute', type: 'reply', kind: 'inbox', id: `inbox-${statusId}`, target: it.author, status: 'done', text: qc.cleaned.slice(0, 60) });
           console.log(`✅ 已回 @${it.author}: ${qc.cleaned}`);
         } else {
-          st.seenNotifs[key] = { at: nowIso(), status: rr.unknown ? 'unknown' : 'failed', note: (rr.note || '').slice(0, 80) }; // unknown/failed 均不重试（评论重复比漏回更糟，留人工/核验）
+          st.seenNotifs[key] = { at: nowIso(), status: rr.unknown ? 'unknown' : 'failed', note: (rr.note || '').slice(0, 80) }; // unknown/failed 不重试（评论重复比漏回糟）
           stats.failed++;
           log({ action: 'execute', type: 'reply', kind: 'inbox', id: `inbox-${statusId}`, target: it.author, status: rr.unknown ? 'unknown' : 'failed', note: rr.note });
           console.log(`${rr.unknown ? '⏳ 结果不明' : '❌ 失败'} @${it.author}: ${rr.note}`);
         }
         saveSt(st);
-        await sleep(rand(20000, 50000)); // 同轮多条之间拉开 20-50s
+        await sleep(rand(20000, 50000));
       }
     }
   } finally {
@@ -274,5 +343,5 @@ async function replyToComment(page, postUrl, statusId, text) {
     saveSt(st);
   }
   log({ action: 'pollEnd', ...stats });
-  console.log(`本轮：扫 ${stats.seen} 条，新 ${stats.fresh}，回 ${stats.replied}，败 ${stats.failed}，自家跳过 ${stats.skippedOwn}，日帽跳过 ${stats.skippedCap}`);
+  console.log(`本轮：扫 ${stats.seen}，新 ${stats.fresh}，回 ${stats.replied}（模板 ${stats.greetTpl}），转人工 ${stats.todo}，败 ${stats.failed}，自家跳过 ${stats.skippedOwn}，日帽跳过 ${stats.skippedCap}`);
 })().catch((e) => { console.error(e.message || e); process.exit(1); });

@@ -48,19 +48,24 @@ const FALLBACK = [
 ];
 const seedPick = (acc, date) => { const s = `${date}|${acc}`; let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return FALLBACK[h % FALLBACK.length]; };
 
-// ── LLM 预制生成（根据前一天换一批说法；质量门过两道防截断/超长） ──
+// ── LLM 预制生成（10-21 P0-③ 升级：分时段语气 + 当日话题素材参考——fullwin topic-posts 方法论，三槽形式不变） ──
+function loadMaterial(acc) {
+  try { const m = JSON.parse(require('fs').readFileSync(path.join(STATE_DIR, `mutual-material-${acc}.json`), 'utf8')); return (m.posts || []).slice(-6); } catch { return []; }
+}
 async function genTexts(acc, date, count) {
   const acct = CFG.accounts.find((a) => a.key === acc);
   const persona = (CFG.personas || {})[acc] || `X 账号 @${(acct || {}).handle || acc} 的运营者本人，聊美股交易日常。`;
   const st = loadState(acc);
   const avoid = st.history.slice(0, 6);
+  const material = loadMaterial(acc);
   const user = [
     `写 ${count} 条今天要发的互关招揽帖（日期 ${date}）。要求：`,
     `①每条 60~120 字，第一人称，像日常随手发；`,
-    `②内容落在你的领域日常（盘面/标的/交易感悟任选其一切入），结尾自然带出"求互相关注/欢迎来主页串门/一起交流"之意；`,
-    `③不要话题标签（标签由程序附加）、不要链接、不要@任何人、不喊单不吹收益不编数字；`,
-    `④${count} 条之间切入点不能重复；`,
-    avoid.length ? `⑤必须与前一天的文案明显不同（换结构换措辞换切入点）。前一天的文案：\n${avoid.map((t, i) => `${i + 1}) ${t}`).join('\n')}` : `⑤无历史文案，自由发挥。`,
+    `②${count >= 3 ? '三条分别对应三个发布时段，各带时段语气：第 1 条=早盘档（盘前/开盘氛围，今天要盯什么）；第 2 条=午间档（午后歇盘/闲聊感）；第 3 条=晚间档（收盘复盘感）' : '贴合发布时段的语气（早盘/午间/复盘）'}；`,
+    `③内容落在你的领域日常，结尾自然带出"求互相关注/欢迎来主页串门/一起交流"之意；`,
+    `④不要话题标签（标签由程序附加）、不要链接、不要@任何人、不喊单不吹收益不编数字；`,
+    material.length ? `⑤下面是今天互关话题里别人正在聊的片段（只学话题风向，严禁照抄句子）：\n${material.map((x) => `- ${x.text}`).join('\n')}` : `⑤无话题素材，自由发挥。`,
+    avoid.length ? `⑥必须与前一天的文案明显不同（换结构换措辞换切入点）。前一天的文案：\n${avoid.map((t, i) => `${i + 1}) ${t}`).join('\n')}` : `⑥无历史文案，自由发挥。`,
     `只输出 ${count} 条，每条一行，行首用 1) 2) 3) 编号。`,
   ].join('\n');
   const r = await chat({ messages: [{ role: 'system', content: `你是 X(Twitter) 账号的运营者本人。人设：${persona}` }, { role: 'user', content: user }], maxTokens: 700 });

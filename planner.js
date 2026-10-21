@@ -140,7 +140,7 @@ async function planVisit(ts) {
       console.log(`  质量门未过(@${e.handle}，第${g + 1}次): ${qc.reason}${g === 0 ? '，重试' : ''}`);
     }
     if (!qc || !qc.ok) continue;
-    out.push({ id: `${today()}-${WINDOW}-visit-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'visit', postUrl: post.postUrl, statusId: post.statusId, targetHandle: e.handle, text: qc.cleaned, followFirst: false, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
+    out.push({ id: `${today()}-${WINDOW}-visit-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'visit', postUrl: post.postUrl, statusId: post.statusId, targetHandle: e.handle, text: qc.cleaned, targetLen: (post.text || '').length, followFirst: false, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
     console.log(`  串门入队 @${e.handle}（${e.stage}，分${e.score}）：${qc.cleaned.slice(0, 36)}…`);
     await sleep(rand(800, 1600));
   }
@@ -225,6 +225,14 @@ async function planCommunity(ts) {
     console.log(`话题候选=云端池 ${posts.length} 条 → 合格 ${cands.length} 条（48h，按互动热度；淘汰：${rejLine}）`);
     if (DIAG) { console.log('[诊断汇总] 云端池 ' + posts.length + ' → 合格 ' + cands.length + '；死因：' + rejLine); return []; }
     cands = cands.slice(0, cap + 3);
+    // 10-21 P0-③：素材收割（互关帖预制参考池，滚动留 30 条——fullwin topic-posts 方法论，形式不变）
+    try {
+      const mf = path.join(STATE_DIR, `mutual-material-${ACCOUNT}.json`);
+      let m = { posts: [] }; try { m = JSON.parse(fs.readFileSync(mf, 'utf8')); } catch { }
+      for (const p of cands.slice(0, 12)) m.posts.push({ at: new Date().toISOString(), author: p.author, text: (p.text || '').slice(0, 80) });
+      m.posts = m.posts.slice(-30);
+      fs.writeFileSync(mf, JSON.stringify(m, null, 2));
+    } catch { }
   } catch (e) {
     console.log('云端池失败/不可用（' + String(e.message).slice(0, 60) + '），本轮互关跳过');
     try { fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: new Date().toISOString(), task: 'planner', account: ACCOUNT, window: WINDOW, action: 'poolFail', note: String(e.message).slice(0, 80) }) + '\n'); } catch { }
@@ -249,7 +257,7 @@ async function planCommunity(ts) {
       console.log(`  质量门未过(@${p.author}，第${g + 1}次): ${qc.reason}${g === 0 ? '，重试' : ''}`);
     }
     if (!qc || !qc.ok) continue;
-    out.push({ id: `${today()}-${WINDOW}-community-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'community', postUrl: 'https://x.com' + p.link, statusId: p.id, targetHandle: p.author, text: qc.cleaned, followFirst: true, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
+    out.push({ id: `${today()}-${WINDOW}-community-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'community', postUrl: 'https://x.com' + p.link, statusId: p.id, targetHandle: p.author, text: qc.cleaned, targetLen: (p.text || '').length, followFirst: true, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
     console.log(`  互关入队 @${p.author}：${qc.cleaned.slice(0, 36)}…`);
     await sleep(rand(800, 1600));
   }
@@ -437,15 +445,24 @@ async function planPost(ts) {
   for (const t of texts) {
     if (out.length >= cap - inWindow) break;
     if (!t || !t.text || seen.has(t.text)) { console.log('  跳过（空/重复）:', String(t.text).slice(0, 24)); continue; }
-    const wl = quality.weightedLen(t.text);
-    if (wl > 280) { console.log(`  跳过（超长 ${wl}>280）:`, t.text.slice(0, 24)); continue; }
-    seen.add(t.text); // C2 修复：选中即入去重集（同批相同文本不再二次入队）
+    let postText = t.text;
+    const wl = quality.weightedLen(postText);
+    if (wl > 280) {
+      // 10-21 P0（fullwin post-len 成果移植）：超长不再跳过丢量——LLM 重压缩保原意到限内；压缩失败才跳过
+      try {
+        const { ensurePostLen } = require('./post-len');
+        const squeezed = await ensurePostLen(postText);
+        if (squeezed && quality.weightedLen(squeezed) <= 280) { console.log(`  超长 ${wl}>280 已重压缩到 ${quality.weightedLen(squeezed)}`); postText = squeezed; }
+        else { console.log(`  跳过（超长 ${wl}>280 压缩失败）:`, postText.slice(0, 24)); continue; }
+      } catch (e) { console.log(`  跳过（超长 ${wl}>280 压缩异常 ${String(e.message).slice(0, 40)}）:`); continue; }
+    }
+    seen.add(postText); // C2 修复：选中即入去重集（同批相同文本不再二次入队）
     if (out.length > 0) cumMin += GAP[0] + Math.random() * (GAP[1] - GAP[0]); // 第 1 条=窗起点即发，其后累计 1~10min 随机
     const [wh, wm] = String(wTime).split(':').map(Number);
     const bj = new Date(Date.now() + 8 * 3600000); // 北京日期分量
     const postAtMs = Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate(), wh - 8, wm) + cumMin * 60000 + Math.floor(Math.random() * 50) * 1000; // 北京墙钟 wh:wm +累计间隔 +秒级随机
-    out.push({ id: `${today()}-${WINDOW}-post-${baseId + out.length + 1}`, account: ACCOUNT, type: 'post', kind: 'post', text: t.text, quote: t.quote || undefined, quoteUrl: t.quoteUrl || undefined, window: WINDOW, postAt: new Date(postAtMs).toISOString(), status: 'planned', createdAt: new Date().toISOString() });
-    console.log(`  发布入队（${wl}字重${t.quote ? '·引用帖' : ''}·定时 ${String(wTime)}+${cumMin.toFixed(0)}min）: ${t.text.slice(0, 32)}…`);
+    out.push({ id: `${today()}-${WINDOW}-post-${baseId + out.length + 1}`, account: ACCOUNT, type: 'post', kind: 'post', text: postText, quote: t.quote || undefined, quoteUrl: t.quoteUrl || undefined, window: WINDOW, postAt: new Date(postAtMs).toISOString(), status: 'planned', createdAt: new Date().toISOString() });
+    console.log(`  发布入队（${quality.weightedLen(postText)}字重${t.quote ? '·引用帖' : ''}·定时 ${String(wTime)}+${cumMin.toFixed(0)}min）: ${postText.slice(0, 32)}…`);
   }
   // 消费投递文件（改名留审计；后缀去掉 .json 防重扫=C1 双保险；未入队的超额内容保留在 .done 里不丢）
   for (const f of usedFiles) { try { fs.renameSync(path.join(POSTS_INBOX, f), path.join(POSTS_INBOX, f + '.done-' + Date.now())); } catch { } }
