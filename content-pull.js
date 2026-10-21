@@ -35,6 +35,9 @@ async function fetchJSON(url) {
 
 // 下一执行窗（滴灌目标）：am<10:20 / mid<15:20 / pm 其余
 function nextWindow() { const m = new Date(Date.now() + 8 * 3600000).getUTCHours() * 60 + new Date(Date.now() + 8 * 3600000).getUTCMinutes(); return m < 575 ? 'p1' : m < 755 ? 'p2' : m < 1175 ? 'p3' : 'p1'; } // 发布窗 09:35/12:35/19:35（分钟界 575/755/1175）
+// 10-21 修复：round 窗内拉取时滴灌目标由 --window 显式锚定（nextWindow 在边界分钟会算成下一窗，曾致 p1 窗滴 p2 配额错位丢 2 条）
+const _wIdx = process.argv.findIndex((a) => a === '--window' || a.startsWith('--window='));
+const W_OVERRIDE = (_wIdx < 0 ? '' : (process.argv[_wIdx] === '--window' ? (process.argv[_wIdx + 1] || '') : process.argv[_wIdx].slice('--window='.length))).trim(); // 兼容 '--window p1' 与 '--window=p1' 两种写法
 // 今日已入队帖数（该号）：扫今日各窗队列里 type=post 且未跳过的条目（10-20 修复：窗名写死 am/mid/pm 永远数 0，日帽形同虚设 → 改读 config.rounds.windows 键）
 function enqueuedToday(local) {
   let n = 0;
@@ -123,7 +126,7 @@ function postedTexts(local) {
     else if (isWeekend) why = '周末不投递（拍板 P5）';
     else {
       const BA = (CFG.posts && CFG.posts.budgetByAccount || {})[b.local] || BUDGET;
-      const w = nextWindow();
+      const w = W_OVERRIDE || nextWindow();
       const allocR = (BA.windowAllocation || {})[w] ?? 0;
       // 10-20 定稿：{min,max} 区间用"日期+窗+账号"做种子掷确定数，与 planner 消费帽同源同数（原两边各自随机=滴3条帽6条的错位）
       const seedRoll = (mn, mx) => { const s = `${bjDate(0)}|${w}|${b.local}|${mn}|${mx}`; let hh = 0; for (let i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return mn + (hh % (mx - mn + 1)); };

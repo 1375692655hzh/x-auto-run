@@ -51,8 +51,10 @@ const run = (args, opts = {}) => {
   console.log(`执行窗 ${WINDOW} 开始（${WCFG.time || '?'}，模式: ${MODES}，第 ${rs.completed + 1} 轮，${dry ? '演练模式' : '真实执行模式'}）`);
 
   // 发布窗内置拉取（10-18 拍板：p1/p2/p3 与云端生成完成时刻 09:35/12:35/19:35 对齐——窗内先拉后滴灌，planner 再拾取发布）
+  // 10-21 修复：滴灌必须锚定本窗（--window 传入）——content-pull 自算 nextWindow() 在 09:35/12:35/19:35 边界分钟会算成下一窗
+  // （p1 窗滴了 p2 配额 4 条、p1 planner 帽子只有 2 → 2 条进 .done 永不再发，wcixot p1 帖 2/5 事故根因）
   if (MODES.includes('pull')) {
-    run([path.join(ROOT, 'content-pull.js')], { env: { ...process.env, NODE_EXTRA_CA_CERTS: path.join(ROOT, 'x-daily-cert.pem') } });
+    run([path.join(ROOT, 'content-pull.js'), '--window', WINDOW], { env: { ...process.env, NODE_EXTRA_CA_CERTS: path.join(ROOT, 'x-daily-cert.pem') } });
   }
   const okPlan = run([path.join(ROOT, 'planner.js'), '--account', ACCOUNT, '--mode', MODES, '--window', WINDOW]);
   if (!okPlan) log({ action: 'round', window: WINDOW, note: 'planner 失败' });
