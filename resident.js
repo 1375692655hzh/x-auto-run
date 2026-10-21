@@ -211,10 +211,13 @@ async function retryTransient(fn) {
 if (WATCHDOG) {
   (async () => {
     const st = loadSt();
-    const fresh = st.heartbeatAt && Date.now() - Date.parse(st.heartbeatAt) < 20 * 60000;
+    // 10-21 升级：心跳+页面双健康才算活——僵尸态（页面全 detached 但循环照跑）心跳照写曾骗过看门狗 7h
+    const hbFresh = st.heartbeatAt && Date.now() - Date.parse(st.heartbeatAt) < 20 * 60000;
+    const pagesFresh = st.pagesOkAt && Date.now() - Date.parse(st.pagesOkAt) < 30 * 60000;
+    const fresh = !!(hbFresh && pagesFresh);
     const hour = new Date().getHours();
-    if (fresh || hour < RC.startHour || hour >= RC.endHour) { LOG(`看门狗：${fresh ? '常驻心跳正常' : '不在时段'}，不动`); process.exit(0); }
-    LOG('看门狗：心跳超时，拉起常驻进程');
+    if (fresh || hour < RC.startHour || hour >= RC.endHour) { LOG(`看门狗：${fresh ? '常驻心跳+页面正常' : '不在时段'}，不动`); process.exit(0); }
+    LOG('看门狗：常驻失活（心跳超时或页面僵死），拉起常驻进程');
     const { spawn } = require('child_process');
     const child = require('child_process').spawn('cmd', ['/c', path.join(ROOT, `定时-常驻-${ACCOUNT}.bat`)], { detached: true, stdio: 'ignore', cwd: ROOT }); // 拉 bat 才有日志重定向（10-20 修复：直 spawn node 导致常驻无日志）
     child.unref();
@@ -233,19 +236,42 @@ if (WATCHDOG) {
   if (hour < RC.startHour || hour >= RC.endHour) { console.error(`不在常驻时段 ${RC.startHour}:00-${RC.endHour}:00`); process.exit(0); }
 
   LOG(`常驻启动：@${ACCT.handle}，三页面（回复/巡逻/发布），LLM=${RC.llmChannel}，帖帽${RC.postCapDay} 回复帽${RC.replyCapDay}`);
-  const j = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).then((r) => r.json());
-  if (!j.success) { console.error('开窗失败:', JSON.stringify(j).slice(0, 100)); process.exit(1); }
-  const browser = await puppeteer.connect({ browserWSEndpoint: j.data.ws, defaultViewport: null, protocolTimeout: 90000 });
-  try { const ps0 = await browser.pages(); for (let i = 1; i < ps0.length; i++) { try { await ps0[i].close(); } catch { } } } catch { } // 清理上次异常退出留下的孤儿页
-  const pageReply = await browser.newPage(); await pageReply.setViewport({ width: 1400 + randi(0, 120), height: 900 });
-  const pagePost = await browser.newPage(); await pagePost.setViewport({ width: 1400 + randi(0, 120), height: 900 });
-  // pageTopic 已拆（10-21：巡逻改纯云端池驱动，常驻搜索页消失——窗口从三页降两页）
-  // 常驻页全部自动应答模态框（beforeunload"离开此网站"等）——10-20 全天协议超时根因
-  for (const pg of [pageReply, pagePost]) pg.on('dialog', (d) => d.accept().catch(() => { }));
-  await pageReply.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { });
-  if (!(await verifyLogin(pageReply, ACCT.handle))) { console.error('登录态校验失败'); await cleanup(); process.exit(1); }
+
+  // 单实例守卫（10-21 事故：无守卫时一晚 5 次重复启动，新实例清页签把旧实例拆成僵尸）：
+  // 已有活实例（心跳新鲜+pid 活）则本次退出。新代码只在页面健康时写心跳，心跳新鲜=真活着
+  {
+    const prev = loadSt();
+    if (prev.heartbeatAt && Date.now() - Date.parse(prev.heartbeatAt) < 20 * 60000 && prev.pid && prev.pid !== process.pid) {
+      try { process.kill(prev.pid, 0); console.error(`已有活实例(pid ${prev.pid})，本次退出（防拆工位）`); process.exit(0); }
+      catch (e) { if (e.code === 'EPERM') { console.error(`已有活实例(pid ${prev.pid})，本次退出`); process.exit(0); } }
+    }
+  }
+
+  // 工位=开窗+连接+两工作页+登录校验；启动与自愈共用（10-21：detached Frame 后原代码无任何恢复路径）
+  let browser = null, pageReply = null, pagePost = null;
+  async function openWorkPages() {
+    const j = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).then((r) => r.json());
+    if (!j.success) throw new Error('开窗失败: ' + JSON.stringify(j).slice(0, 100));
+    const b2 = await puppeteer.connect({ browserWSEndpoint: j.data.ws, defaultViewport: null, protocolTimeout: 90000 });
+    try {
+      try { const ps0 = await b2.pages(); for (let i = 1; i < ps0.length; i++) { try { await ps0[i].close(); } catch { } } } catch { } // 清孤儿页
+      const pr = await b2.newPage(); await pr.setViewport({ width: 1400 + randi(0, 120), height: 900 });
+      const pp = await b2.newPage(); await pp.setViewport({ width: 1400 + randi(0, 120), height: 900 });
+      // 常驻页全部自动应答模态框（beforeunload"离开此网站"等）——10-20 全天协议超时根因
+      for (const pg of [pr, pp]) pg.on('dialog', (d) => d.accept().catch(() => { }));
+      await pr.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { });
+      if (!(await verifyLogin(pr, ACCT.handle))) throw new Error('登录态校验失败');
+      const old = browser;
+      browser = b2; pageReply = pr; pagePost = pp; // 全部就绪才切换引用
+      if (old) { try { await old.disconnect(); } catch { } }
+      return true;
+    } catch (e) { try { await b2.disconnect(); } catch { } throw e; }
+  }
+  try { await openWorkPages(); }
+  catch (e) { console.error(String(e.message || e)); await cleanup(); process.exit(1); }
 
   const st = loadSt();
+  st.pid = process.pid; // 供 executor 守卫探活（resident-guard.js）与单实例判断
   if (st.day !== today()) { st.seenNotifs = {}; st.seenPosts = {}; st.lastCloudSlot = {}; st.day = today(); }
   let aborted = false;
   const sendQueue = []; // {kind, statusId, postUrl, author, text, sendAt}
@@ -421,7 +447,42 @@ if (WATCHDOG) {
   // ── 主循环 ──
   LOG(`主循环开始，23:59 自灭（00:05 计划任务接替）；互动窗 ${IH[0]}-${IH[1]} 点，云帖全天（白天≤${cloudQuota()}条/时）；干跑=${DRY}`);
   while (!aborted && Date.now() < endAt.getTime()) {
-    st.heartbeatAt = nowIso(); saveSt(st);
+    // 健康心跳（10-21 事故修复：僵尸态循环照跑、心跳照写，看门狗被骗 7h）：
+    // 探针通过才写心跳；探针失败→清心跳+进程内重开工位（60s 冷却）；连败 15 轮→自灭交看门狗拉起
+    let pagesOk = false;
+    try {
+      await Promise.race([
+        (async () => { await browser.pages(); await pageReply.evaluate(() => 1); await pagePost.evaluate(() => 1); })(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('探针超时')), 10000)),
+      ]);
+      pagesOk = true;
+    } catch { pagesOk = false; }
+    if (pagesOk) {
+      st.heartbeatAt = nowIso(); st.pagesOkAt = nowIso(); st.degradedRounds = 0; saveSt(st);
+    } else {
+      st.degradedRounds = (st.degradedRounds || 0) + 1;
+      st.heartbeatAt = null; saveSt(st); // 心跳清空：看门狗/executor 守卫立即能看到失活
+      LOG(`⚠ 页面探针失败(连续${st.degradedRounds})`);
+      audit({ action: 'residentDegraded', note: `probe fail x${st.degradedRounds}` });
+      const cooled = !st.lastRecoverAt || Date.now() - Date.parse(st.lastRecoverAt) > 60000;
+      if (cooled) {
+        st.lastRecoverAt = nowIso(); saveSt(st);
+        try {
+          await openWorkPages();
+          st.degradedRounds = 0; st.heartbeatAt = nowIso(); st.pagesOkAt = nowIso(); saveSt(st);
+          LOG('✅ 工位重开成功，恢复心跳'); audit({ action: 'residentRecover', status: 'done' });
+        } catch (e) { LOG('工位重开失败: ' + String(e.message).slice(0, 80)); audit({ action: 'residentRecover', status: 'failed', note: String(e.message).slice(0, 80) }); }
+      }
+      if ((st.degradedRounds || 0) >= 15) {
+        LOG('连续恢复失败，自灭退出（看门狗 10min 内拉起）');
+        st.heartbeatAt = null; saveSt(st);
+        audit({ action: 'residentFatal', note: '探针连败15轮自灭' });
+        try { await cleanup(); } catch { }
+        process.exit(1);
+      }
+      await sleep(20 * 1000);
+      continue;
+    }
     const now = new Date();
     const hourKey = `${today()}-${now.getHours()}`;
     try {

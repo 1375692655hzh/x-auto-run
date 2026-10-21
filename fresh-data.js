@@ -61,7 +61,11 @@ async function ensureRadarFresh(opts = {}) {
     if (r) { results[h] = r; updated++; }
     await new Promise((r2) => setTimeout(r2, 1500));
   }
-  if (!updated) return { fresh: false, why: '现采全失败，保旧值' };
+  if (!updated) {
+    // 10-21：全失败且快照无任何真值 → 明示站点故障（调用方可显示"通道故障"而非误导性的"无数据"）
+    const anyOk = Object.values(results).some((v) => v && okFour(v.four));
+    return { fresh: false, why: anyOk ? '现采全失败，保旧值' : 'site-broken', siteBroken: !anyOk };
+  }
   snap.radar = { fetchedAt: new Date().toISOString(), results };
   writeJson(snapFile(), snap);
   return { fresh: true, updated, total: handles.length };

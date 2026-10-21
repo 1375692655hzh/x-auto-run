@@ -7,6 +7,8 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const quality = require('./quality');
+const { ensurePostLen } = require('./post-len');
 
 const ROOT = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
@@ -47,14 +49,56 @@ const quota = () => { const h = new Date().getHours(); const [d, e] = [8, 22]; r
     const items = readJson(path.join(INBOX, f), []);
     const roomLeft = Math.max(0, take - queued);
     const fileItems = items.slice(0, roomLeft);
-    for (const it of fileItems) { entries.push({ text: it.text, quote: it.quote, quoteUrl: it.quoteUrl }); queued++; }
+    for (const it of fileItems) {
+      let t = it.text;
+      // 入队长度门（10-21 根因修复：上游偶发产出 >280 加权长文，发布按钮被禁用必败）
+      if (quality.weightedLen(t) > 270) {
+        const fx = await ensurePostLen(t, { channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
+        if (fx && fx.text) { audit({ action: 'postLenFix', note: `入队压缩 ${fx.before}→${fx.after} via ${fx.via}` }); t = fx.text; }
+      }
+      entries.push({ text: t, quote: it.quote, quoteUrl: it.quoteUrl }); queued++;
+    }
     const rest = items.slice(fileItems.length); // 余量写回，下一小时继续
     if (rest.length) writeJson(path.join(INBOX, f), rest);
     else { try { fs.renameSync(path.join(INBOX, f), path.join(INBOX, f + '.done-' + Date.now())); } catch { } }
     if (queued >= take) break;
   }
+
+  // ②b 补跑清扫（10-21 事故修复：云帖失败无补跑=永久丢量，违背交付必达）：
+  // 扫近 2 日云帖队列里 status=failed 且未补跑过的条目，重压缩（超限是真因）后并入本小时额度消化。
+  // 放在"投递箱空"退出判断之前——空箱小时也要补跑（交付优先于新内容）
+  try {
+    for (let dd = 1; dd >= 0; dd--) {
+      const d = new Date(Date.now() - dd * 86400000);
+      const dayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      for (let h = 0; h <= 23; h++) {
+        const p = path.join(QUEUE_DIR, `${dayStr}-cloud-${ACCOUNT}-${h}.json`);
+        if (!fs.existsSync(p)) continue;
+        if (h === new Date().getHours() && dd === 0) continue; // 本小时文件还没写，不扫自己
+        let q = null; try { q = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { continue; }
+        if (!Array.isArray(q)) continue;
+        let dirty = false;
+        for (const e of q) {
+          if (e.status !== 'failed' || e.requeued) continue;
+          if (entries.length >= take) break;
+          let t = e.text;
+          if (quality.weightedLen(t) > 270) {
+            const fx = await ensurePostLen(t, { channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
+            if (fx && fx.text) t = fx.text;
+          }
+          entries.push({ text: t, quote: e.quote, quoteUrl: e.quoteUrl, requeueOf: e.id });
+          e.requeued = true; e.result = (e.result || '') + ` → 补跑清扫收编(${today()})`; dirty = true;
+          audit({ action: 'cloudSweep', status: 'requeued', id: e.id, note: `加权${quality.weightedLen(e.text)}→${quality.weightedLen(t)}` });
+        }
+        if (dirty) writeJson(p, q);
+        if (entries.length >= take) break;
+      }
+      if (entries.length >= take) break;
+    }
+  } catch (e) { audit({ action: 'cloudSweep', status: 'error', note: String(e.message || e).slice(0, 80) }); }
+
   if (!entries.length) { audit({ action: 'cloudPost', status: 'none', note: '投递箱空（上游无新内容或缓存未滴）' }); process.exit(0); }
-  LOG(`本小时额度 ${take}，取到 ${entries.length} 条`);
+  LOG(`本小时额度 ${take}，取到 ${entries.length} 条${entries.some((e) => e.requeueOf) ? `（含补跑 ${entries.filter((e) => e.requeueOf).length} 条）` : ''}`);
 
   // ③ 写队列 + 定时拉起（2~8min 间隔）
   const qFile = path.join(QUEUE_DIR, `${today()}-cloud-${ACCOUNT}-${new Date().getHours()}.json`);
@@ -73,7 +117,10 @@ const quota = () => { const h = new Date().getHours(); const [d, e] = [8, 22]; r
     setTimeout(() => {
       LOG(`到点发布 ${e.id}`);
       spawnSync(process.execPath, [path.join(ROOT, 'executor.js'), '--account', ACCOUNT, '--queue', qFile, '--entry', e.id], { cwd: ROOT, stdio: 'inherit' });
-      ledgerRecord('post'); ledgerRecord('postCloud');
+      // 10-21 修复：executor 尝试即记 'post'（保守口径），这里原来无论成败再记 post+postCloud=双记，
+      // 6 连败白烧 8+ 条额度。改为：postCloud 仅在 done/unknown（真实发出或可能已发出）时记
+      const st = (readJson(qFile, []) || []).find((x) => x && x.id === e.id);
+      if (st && (st.status === 'done' || st.status === 'unknown')) ledgerRecord('postCloud');
     }, delay);
   }
   const lastMs = Math.max(...queue.map((e) => Date.parse(e.postAt))) - Date.now() + 5 * 60000;

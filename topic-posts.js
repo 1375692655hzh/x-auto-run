@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { generateReply } = require('./llm');
+const { closeWindowIfFree } = require('./resident-guard');
 const quality = require('./quality');
 
 const ROOT = __dirname;
@@ -91,7 +92,7 @@ async function collectMaterialBrowser() {
   } finally {
     try { await page.close(); } catch { }
     await browser.disconnect();
-    await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { });
+    await closeWindowIfFree(ACCOUNT, ACCT.profileId); // 10-21：常驻在场不关窗（防拆 fullwin 工位）
   }
 }
 

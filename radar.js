@@ -157,14 +157,27 @@ function parseFour(text, aria) {
     let snap = {};
     try { snap = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { }
     snap.checkedAt = snap.checkedAt || new Date().toISOString();
-    // 逐号合并：本次解析全空（渲染/解析失败）的号保留快照旧结果，不拿空值覆盖好数据（10-16 教训：曾把 Owen 早间 100/100 覆盖成 null）
+    // 逐号三态合并（10-21 事故修复：站点改版后解析全空，空值仍写进快照把"无数据"盖了一整天）：
+    // 本次有值→用新值；本次空→当日旧值→昨日快照值；全空则记 channelError（报告可辨"站点故障"≠"账号无数据"）
     const prev = (snap.radar && snap.radar.results) || {};
+    let prevDay = {};
+    try {
+      const d = new Date(Date.now() - 86400000);
+      const dayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const ySnap = JSON.parse(fs.readFileSync(path.join(STATE_DIR, 'health-snapshots', `${dayStr}.json`), 'utf8'));
+      prevDay = ((ySnap.radar || {}).results) || {};
+    } catch { }
     const okFour = (f) => f && Object.values(f).some((v) => v != null);
     const merged = {};
+    let anyOk = false;
     for (const h of RC.handles) {
-      merged[h] = okFour(results[h] && results[h].four) ? results[h] : (prev[h] || results[h]);
+      if (okFour(results[h] && results[h].four)) { merged[h] = results[h]; anyOk = true; }
+      else if (okFour(prev[h] && prev[h].four)) merged[h] = prev[h];
+      else if (okFour(prevDay[h] && prevDay[h].four)) merged[h] = Object.assign({}, prevDay[h], { staleDay: true });
+      else merged[h] = { url: (results[h] || {}).url, four: { suggestion: null, search: null, ghost: null, deboost: null, score: null, verdict: null, accountAgeDays: null }, ariaRaw: null, channelError: '站点改版/解析失败(10-21)' };
     }
-    snap.radar = { fetchedAt: new Date().toISOString(), results: merged };
+    // fetchedAt 只在至少 1 号拿到真值时刷新——全空不刷新，TTL 层才会继续尝试现采
+    snap.radar = { fetchedAt: anyOk ? new Date().toISOString() : ((snap.radar && snap.radar.fetchedAt) || new Date(Date.now() - 3600000).toISOString()), results: merged };
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify(snap, null, 2));
     fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: new Date().toISOString(), task: 'radar', account: 'butcher', action: 'check', note: RC.handles.join(',') + ' 四维度判定' }) + '\n');

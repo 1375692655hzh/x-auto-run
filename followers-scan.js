@@ -6,6 +6,7 @@
 // 设计: 必须用每个号自己的窗口——互关状态（我是否关注了该粉丝）只有本人视角的按钮态是对的；
 //       只读滚动浏览，不点任何按钮；PAUSE 生效即退出；比特浏览器不在线则当日跳过记日志。
 const puppeteer = require('puppeteer-core');
+const { closeWindowIfFree } = require('./resident-guard');
 const fs = require('fs');
 const path = require('path');
 
@@ -88,7 +89,7 @@ async function scanAccount(acct, snapshot) {
       await browser.disconnect().catch(() => { });
     }
   } finally {
-    await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: acct.profileId }) }).catch(() => { });
+    await closeWindowIfFree(acct.key, acct.profileId); // 10-21：常驻在场不关窗（防拆 fullwin 工位）
   }
 }
 

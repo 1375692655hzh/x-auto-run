@@ -47,7 +47,8 @@ async function push(text) {
 (async () => {
   // ── 现采（10-21 拍板）：报告生成时现场拉雷达+粉丝（TTL 内自动跳过），慢数据只留互关占比走半夜快照 ──
   const [rf, pf] = await Promise.allSettled([ensureRadarFresh(), ensureProfilesFresh()]);
-  const freshNote = [rf.status === 'fulfilled' && rf.value.fresh ? '雷达现采' : '雷达沿用快照', pf.status === 'fulfilled' && pf.value.fresh ? '粉丝现采' : '粉丝沿用快照'].join('·');
+  const siteBroken = rf.status === 'fulfilled' && rf.value.siteBroken;
+  const freshNote = [siteBroken ? '雷达通道故障(站点改版)' : rf.status === 'fulfilled' && rf.value.fresh ? '雷达现采' : '雷达沿用快照', pf.status === 'fulfilled' && pf.value.fresh ? '粉丝现采' : '粉丝沿用快照'].join('·');
   // ── 数据聚合 ──
   const snap = readJson(path.join(STATE_DIR, 'health-snapshots', `${today()}.json`), null) || readJson(path.join(STATE_DIR, 'health-snapshots', `${new Date(Date.now() - 86400000).toISOString().slice(0, 10)}.json`), null);
   const accounts = (CFG.accounts || []).filter((a) => a.role !== 'observer');
@@ -59,8 +60,10 @@ async function push(text) {
     const led = readJson(path.join(STATE_DIR, `ledger-${a.key}.json`), { actions: {}, meta: {} });
     const cnt = (k) => ((led.actions || {})[k] || []).filter((t) => t > Date.now() - 6 * 3600000).length; // 滚动近 6h（10-21 拍板：6h 报告配 6h 窗，不再零点清零式累计）
     const radar = snap && snap.radar && snap.radar.results && snap.radar.results[a.handle];
-    const rf = radar && radar.four && Object.values(radar.four).some((v) => v != null)
-      ? `${radar.four.score || '?'}分${['ghost', 'deboost', 'search', 'suggestion'].filter((k) => radar.four[k] && !/未见/.test(radar.four[k])).length ? '⚠有受限' : '全绿'}` : '无数据';
+    const rf = !radar ? '无数据'
+      : radar.channelError ? `通道故障(${String(radar.channelError).slice(0, 20)})`
+      : radar.four && Object.values(radar.four).some((v) => v != null)
+        ? `${radar.four.score || '?'}分${['ghost', 'deboost', 'search', 'suggestion'].filter((k) => radar.four[k] && !/未见/.test(radar.four[k])).length ? '⚠有受限' : '全绿'}${radar.staleDay ? '(昨日值)' : ''}` : '无数据';
     const foll = snap && snap.accounts && snap.accounts[a.key] && snap.accounts[a.key].profile && snap.accounts[a.key].profile.followers;
     // 环比基线=昨日收盘（昨日快照文件的最后写入值）；基线缺失如实标注；百分比仅基数≥100 时显示（新号百分比失真）
     const ySnap = readJson(path.join(STATE_DIR, 'health-snapshots', `${new Date(Date.now() - 86400000).toISOString().slice(0, 10)}.json`), null);

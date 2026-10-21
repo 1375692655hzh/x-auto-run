@@ -18,6 +18,8 @@ const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 const quality = require('./quality');
+const { closeWindowIfFree } = require('./resident-guard');
+const { ensurePostLen } = require('./post-len');
 
 const ROOT = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
@@ -201,7 +203,7 @@ async function submitReply(page) {
     let b = null;
     if (dlg) { const btns = [...dlg.querySelectorAll('[data-testid="tweetButton"]')]; b = btns[btns.length - 1]; }
     else b = document.querySelector('[data-testid="tweetButtonInline"]');
-    if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
+    if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true') return 'disabled'; // 10-21：超限/被禁用时按钮点不了——与"点了没反应"区分开，调用方据此写 note
     b.click(); return true;
   }).catch(() => false);
   if (!clicked) return false;
@@ -248,8 +250,8 @@ async function replyToPost(page, entry) {
   if (!(await page.$(SEL.replyBox))) return { ok: false, note: '输入框未出现' };
   if (!(await typeReply(page, entry.text))) return { ok: false, note: '输入失败' };
   await sleep(800);
-  const r = await submitReply(page); // true | 'unknown' | false
-  return { ok: r === true, unknown: r === 'unknown', raw: r };
+  const r = await submitReply(page); // true | 'unknown' | false | 'disabled'
+  return { ok: r === true, unknown: r === 'unknown', note: r === 'disabled' ? '发布按钮不可点(超限/禁用)' : (r === false ? '点击后无成功气泡' : undefined), raw: r };
 }
 async function followUser(page, handle2) {
   if (!(await gotoFeed(page, 'https://x.com/' + handle2))) return { ok: false, note: '主页加载失败' };
@@ -364,7 +366,7 @@ async function postTweet(page, text) {
   if (!(await typeReply(page, text))) return { ok: false, note: '输入失败' };
   await sleep(800);
   const r = await submitReply(page); // compose 是弹窗形态，成功气泡判定与回复一致
-  if (r !== true) return { ok: r === true, unknown: r === 'unknown', raw: r };
+  if (r !== true) return { ok: r === true, unknown: r === 'unknown', note: r === 'disabled' ? `发布按钮不可点(超限/禁用，加权${quality.weightedLen(text)})` : (r === false ? '点击后15s无成功气泡' : undefined), raw: r };
   // C3 语义分叉（三方方案）：读 toast 区分"新发"vs"已存在"（发过了/already=重复，非新发成功）
   const toast = await page.evaluate(() => ((document.querySelector('[data-testid="toast"]') || {}).textContent || '').trim()).catch(() => '');
   return /发过|already/i.test(toast || '') ? { ok: true, note: '已存在（重复，非本次新发）' } : { ok: true, note: '新发' }; // 10-18 修复：引用帖变体由 postQuote 处理，此处删残留 quoteUrl 引用
@@ -398,7 +400,7 @@ async function postQuote(page, text, quoteUrl) {
   if (!(await typeReply(page, text))) return { ok: false, note: '输入失败' };
   await sleep(800);
   const r = await submitReply(page);
-  if (r !== true) return { ok: r === true, unknown: r === 'unknown', raw: r };
+  if (r !== true) return { ok: r === true, unknown: r === 'unknown', note: r === 'disabled' ? `发布按钮不可点(超限/禁用，加权${quality.weightedLen(text)})` : (r === false ? '点击后15s无成功气泡' : undefined), raw: r };
   const toast = await page.evaluate(() => ((document.querySelector('[data-testid="toast"]') || {}).textContent || '').trim()).catch(() => '');
   return /发过|already/i.test(toast || '') ? { ok: true, note: '已存在（重复，非本次新发）' } : { ok: true, note: '新发·引用帖' };
 }
@@ -490,6 +492,15 @@ function executeAction(page, entry) {
         const qc = quality.check(e.text);
         if (!qc.ok) { e.status = 'skipped'; e.result = '质量门未过: ' + qc.reason; stats.skipped.push(e.id); continue; }
         e.text = qc.cleaned;
+      }
+      // post 长度门（10-21 事故根因修复：云帖 6 连败全因加权>280 按钮被禁用）：
+      // 超 270 先 LLM 重压缩、失败则加权截断兜底——绝不 skip（skip=丢量，违背交付必达）
+      if (e.type === 'post' && quality.weightedLen(e.text) > 270) {
+        const fx = await ensurePostLen(e.text, { channel: ((CFG.resident || {})[ACCOUNT] || {}).llmChannel, fallbackProvider: ((CFG.resident || {})[ACCOUNT] || {}).llmFallback }).catch(() => null);
+        if (fx && fx.text && quality.weightedLen(fx.text) <= 270) {
+          e.text = fx.text;
+          log({ action: 'postLenFix', id: e.id, note: `加权 ${fx.before}→${fx.after} via ${fx.via}`, text: fx.text.slice(0, 60) });
+        } else { e.status = 'skipped'; e.result = `超长(${quality.weightedLen(e.text)}>270)且压缩失败`; stats.skipped.push(e.id); saveQueue(queue); continue; }
       }
       if (capLeftRolling(e.type) <= 0) { e.status = 'skipped'; e.result = `滚动24h额度不足(${e.type})`; stats.skipped.push(e.id); continue; }
       // 定时发布（10-18 拍板）：到点判定已上移至选品器（postAt 未到的帖根本不会被选中）；
@@ -594,7 +605,9 @@ function executeAction(page, entry) {
       } catch { }
       await browser.disconnect();
     }
-    if (ws) await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { });
+    // 10-21 四次修复：收尾关窗前查常驻守卫——该账号有活常驻（心跳<20min+pid活）时绝不关窗，
+    // 窗口是常驻三页面工位（10-21 凌晨事故：无条件关窗把 fullwin 常驻打成 detached 僵尸 7h）
+    if (ws) await closeWindowIfFree(ACCOUNT, ACCT.profileId);
     saveQueue(queue);
     releaseLock();
   }
