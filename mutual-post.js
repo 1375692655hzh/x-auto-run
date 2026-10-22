@@ -52,23 +52,29 @@ const seedPick = (acc, date) => { const s = `${date}|${acc}`; let h = 0; for (le
 function loadMaterial(acc) {
   try { const m = JSON.parse(require('fs').readFileSync(path.join(STATE_DIR, `mutual-material-${acc}.json`), 'utf8')); return (m.posts || []).slice(-6); } catch { return []; }
 }
+// 槽位→时段语气（10-22 拍板 9 槽制；槽表在 config.mutualPost.slots/slotTimes）
+const SLOT_TONES = { '07': '盘前（开盘前最后准备/隔夜消息消化）', '08': '开盘（刚开盘的即时感）', '10': '上午盘中', '13': '午间（午盘休整/上午小结）', '14': '午后开盘', '16': '下午盘中', '17': '尾盘前', '19': '盘后（收盘刚结束的第一感受）', '20': '晚间（复盘完/收工感）' };
+function slotToneLine() {
+  const keys = Object.keys(MP.slots);
+  return keys.map((k, i) => `第 ${i + 1} 条=${(MP.slotTimes || {})[k] || k}（${SLOT_TONES[String(k).slice(-2)] || '盘中'}语气）`).join('；');
+}
 async function genTexts(acc, date, count) {
   const acct = CFG.accounts.find((a) => a.key === acc);
   const persona = (CFG.personas || {})[acc] || `X 账号 @${(acct || {}).handle || acc} 的运营者本人，聊美股交易日常。`;
   const st = loadState(acc);
-  const avoid = st.history.slice(0, 6);
+  const avoid = st.history.slice(0, 12);
   const material = loadMaterial(acc);
   const user = [
     `写 ${count} 条今天要发的互关招揽帖（日期 ${date}）。要求：`,
     `①每条 60~120 字，第一人称，像日常随手发；`,
-    `②${count >= 3 ? '三条分别对应三个发布时段，各带时段语气：第 1 条=早盘档（盘前/开盘氛围，今天要盯什么）；第 2 条=午间档（午后歇盘/闲聊感）；第 3 条=晚间档（收盘复盘感）' : '贴合发布时段的语气（早盘/午间/复盘）'}；`,
+    `②${count > 1 ? `${count} 条分别对应 ${count} 个发布整点，各带时段语气：${slotToneLine()}` : '贴合发布时段的语气（按当前时点：盘前/盘中/午间/盘后/晚间）'}；`,
     `③内容落在你的领域日常，结尾自然带出"求互相关注/欢迎来主页串门/一起交流"之意；`,
-    `④不要话题标签（标签由程序附加）、不要链接、不要@任何人、不喊单不吹收益不编数字；`,
+    `④不要话题标签（标签由程序附加）、不要链接、不要@任何人、不喊单不吹收益不编数字、不要把日期或时段标签写进正文；`,
     material.length ? `⑤下面是今天互关话题里别人正在聊的片段（只学话题风向，严禁照抄句子）：\n${material.map((x) => `- ${x.text}`).join('\n')}` : `⑤无话题素材，自由发挥。`,
-    avoid.length ? `⑥必须与前一天的文案明显不同（换结构换措辞换切入点）。前一天的文案：\n${avoid.map((t, i) => `${i + 1}) ${t}`).join('\n')}` : `⑥无历史文案，自由发挥。`,
+    avoid.length ? `⑥必须与前一天的文案明显不同（换结构换措辞换切入点，${count} 条之间切入点也不重复）。前一天的文案：\n${avoid.map((t, i) => `${i + 1}) ${t}`).join('\n')}` : `⑥无历史文案，自由发挥。`,
     `只输出 ${count} 条，每条一行，行首用 1) 2) 3) 编号。`,
   ].join('\n');
-  const r = await chat({ messages: [{ role: 'system', content: `你是 X(Twitter) 账号的运营者本人。人设：${persona}` }, { role: 'user', content: user }], maxTokens: 700 });
+  const r = await chat({ messages: [{ role: 'system', content: `你是 X(Twitter) 账号的运营者本人。人设：${persona}` }, { role: 'user', content: user }], maxTokens: 400 + count * 160 });
   const lines = String(r.text || '').split(/\r?\n/).map((s) => s.replace(/^\s*\d+[\)）\.、]?\s*/, '').trim()).filter((s) => s.length >= 20);
   const out = [];
   for (const t of lines) {
@@ -247,20 +253,21 @@ async function postSlot(acc, slot) {
 
 (async () => {
   if (PREFAB) {
-    const date = argOf('date', today(1)); // 预制=明天的三条（--date 可指定，如首跑补当天）
+    const date = argOf('date', today(1)); // 预制=明天的文案（--date 可指定，如首跑补当天）
+    const N = Object.keys(MP.slots).length; // 10-22 拍板 9 槽制
     for (const acc of ACCOUNTS) {
       const st = loadState(acc);
-      if (st.date === date && st.texts.length >= 3) { console.log(`[${acc}] ${date} 预制已存在，跳过`); continue; }
-      const texts = await ensureTexts(acc, date, 3);
-      // 历史推进：把"今天发过的三条"压进 history（供下次避重），cap 30
+      if (st.date === date && st.texts.length >= N) { console.log(`[${acc}] ${date} 预制已存在（${st.texts.length}/${N}），跳过`); continue; }
+      const texts = await ensureTexts(acc, date, N);
+      // 历史推进：把"今天发过的文案"压进 history（供下次避重），cap 30
       const used = st.date === today() ? st.texts : [];
       saveState(acc, { date, texts, history: [...used, ...(st.history || [])].slice(0, 30) });
       log(acc, { action: 'prefab', date, texts: texts.map((t) => t.slice(0, 30)) });
-      console.log(`[${acc}] ${date} 预制完成：\n${texts.map((t, i) => `  ${i + 1}) ${t}`).join('\n')}`);
+      console.log(`[${acc}] ${date} 预制完成（${texts.length}/${N}）：\n${texts.map((t, i) => `  ${i + 1}) ${t}`).join('\n')}`);
     }
     return;
   }
-  if (!SLOT || MP.slots[SLOT] == null) { console.error('用法: --prefab 或 --slot am|mid|pm [--account X] [--dry]'); process.exit(1); }
+  if (!SLOT || MP.slots[SLOT] == null) { console.error('用法: --prefab 或 --slot <槽键（见 config.mutualPost.slots）> [--account X] [--dry]'); process.exit(1); }
   const t0 = Date.now();
   for (let i = 0; i < ACCOUNTS.length; i++) {
     const acc = ACCOUNTS[i];
