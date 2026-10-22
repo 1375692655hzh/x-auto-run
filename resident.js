@@ -42,6 +42,14 @@ const LOG = (s) => console.log(`[${new Date().toTimeString().slice(0, 8)}] ${s}`
 function readJson(p, d) { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return d; } }
 function writeJson(p, j) { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(j, null, 2)); }
 function audit(obj) { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: nowIso(), task: 'resident', account: ACCOUNT, ...obj }) + '\n'); }
+// 误发独立帖旁证登记（10-22）：回复发送成功即登记，verify-reply.js 定时消费——双端点确认才告警进人工待办，
+// 不自动处置（用户拍板：FxTwitter 有抽风，不作唯一判据引导操作）
+function queueVerify(entry) {
+  const f = path.join(STATE_DIR, `pending-verify-${ACCOUNT}.json`);
+  const list = readJson(f, []);
+  list.push({ at: nowIso(), text: String(entry.text || '').slice(0, 80), statusId: entry.statusId || null, target: entry.target || null, source: entry.source || null, checks: 0 });
+  writeJson(f, list.slice(-50));
+}
 
 // ── 滚动账本（与 executor 同文件同格式，24h 滚动） ──
 const LEDGER_FILE = path.join(STATE_DIR, `ledger-${ACCOUNT}.json`);
@@ -76,19 +84,46 @@ async function verifyLogin(page, handle) {
   } catch { }
   return false;
 }
-async function typeReply(page, text) {
-  return page.evaluate((sel, t) => {
-    const all = document.querySelectorAll(sel);
-    const el = document.querySelector('[role="dialog"] ' + sel) || all[all.length - 1];
+// 回复上下文绑定探针（10-22"回复变独立帖"事故修复，glm+kimi 联合诊断）：
+//   弹窗形态：回复弹窗必含父帖 article（独立发帖弹窗没有——10-22 owen 窗只读探针实测），父帖作者链接须匹配目标 handle
+//   无弹窗形态：仅接受 URL 仍是目标帖 permalink 的内联回复框；/home 主发帖框=独立帖通道，硬性拒发
+// 注意：弹窗内无 /status/ 链接（实测 dlgStatusLinks=[]），目标校验只能靠父帖作者 handle
+function probeReplyComposer(sid, handle) {
+  const boxSel = '[data-testid="tweetTextarea_0"]';
+  const dlg = document.querySelector('[role="dialog"]');
+  if (dlg && dlg.querySelector(boxSel)) {
+    const art = dlg.querySelector('article');
+    if (!art) return { ok: false, note: 'dialog无父帖卡片(独立发帖弹窗)' };
+    if (handle) {
+      const hit = [...art.querySelectorAll('a[href^="/"]')].some((a) => ((a.getAttribute('href') || '').split('/')[1] || '').toLowerCase() === handle);
+      if (!hit) return { ok: false, note: 'dialog父帖作者非@' + handle };
+    }
+    return { ok: true, mode: 'dialog' };
+  }
+  const m = location.pathname.match(/^\/[^/]+\/status\/(\d+)/);
+  if (m && sid && m[1] === String(sid) && document.querySelector(boxSel)) return { ok: true, mode: 'inline' };
+  return { ok: false, note: '无绑定composer(' + location.pathname + ')' };
+}
+async function typeReply(page, text, mode) {
+  return page.evaluate((sel, t, m) => {
+    // 严格按闸给的作用域取框（10-22：旧兜底 all[last] 会把文字粘进 /home 主发帖框=独立帖通道）；any=发帖页用
+    const el = m === 'dialog' ? document.querySelector('[role="dialog"] ' + sel)
+      : m === 'inline' ? document.querySelector(sel)
+      : (document.querySelector('[role="dialog"] ' + sel) || document.querySelector(sel));
     if (!el) return false;
     el.focus();
     const dt = new DataTransfer();
     dt.setData('text/plain', t);
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
     return true;
-  }, SEL.replyBox, text).catch(() => false);
+  }, SEL.replyBox, text, mode || 'any').catch(() => false);
 }
-async function submitReply(page) {
+async function submitReply(page, sid, handle) {
+  // 提交前绑定核验（10-22：宁可漏回，不可错发独立帖；发帖流程不传 sid 则跳过此闸）
+  if (sid) {
+    const g = await page.evaluate(probeReplyComposer, String(sid), handle || null).catch(() => null);
+    if (!g || !g.ok) return 'unbound:' + ((g && g.note) || '探针异常');
+  }
   const hasDialog = await page.evaluate(() => !!document.querySelector('[role="dialog"]')).catch(() => false);
   const clicked = await page.evaluate(() => {
     const dlg = document.querySelector('[role="dialog"]');
@@ -115,14 +150,18 @@ async function submitReply(page) {
   }
   return false;
 }
-async function gotoFeed(page, url, tries = 2) {
+async function gotoFeed(page, url, tries = 2, expectSid) {
   for (let i = 0; i < tries; i++) {
-    try { await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }); await page.waitForSelector(SEL.article, { timeout: 45000 }); return true; }
+    try { await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }); await page.waitForSelector(SEL.article, { timeout: 45000 }); }
     catch { }
-    if (await page.$(SEL.article).catch(() => null)) return true;
+    if (await page.$(SEL.article).catch(() => null)) {
+      // 10-22 落地校验：目标帖页被 X 软重定向到 /home 时，后续"输入框存在"等检查全部形同虚设（主发帖框常驻）→独立帖通道；必须视为失败
+      if (expectSid && !(page.url() || '').includes('/status/' + expectSid)) { if (i < tries - 1) { await sleep(3000); continue; } return false; }
+      return true;
+    }
     if (i < tries - 1) await sleep(3000);
   }
-  return !!(await page.$(SEL.article).catch(() => null));
+  return false;
 }
 async function findArticleByStatus(page, statusId) {
   for (const a of await page.$$(SEL.article)) {
@@ -131,7 +170,9 @@ async function findArticleByStatus(page, statusId) {
   return null;
 }
 async function replyOnPage(page, statusId, postUrl, text, entry) {
-  if (!(await gotoFeed(page, postUrl))) return { ok: false, note: '页面加载失败' };
+  // 10-22 入口守卫：statusId 非法=硬性拒发（kimi 诊断：无守卫时畸形 URL 可诱发软重定向→独立帖通道）
+  if (!statusId || !/^\d+$/.test(String(statusId))) return { ok: false, note: 'statusId非法:' + String(statusId) };
+  if (!(await gotoFeed(page, postUrl, 2, statusId))) return { ok: false, note: '页面加载失败/落地被重定向' };
   await sleep(rand(3000, 6000));
   const art = await findArticleByStatus(page, statusId);
   if (!art) return { ok: false, note: '未找到目标帖' };
@@ -142,13 +183,20 @@ async function replyOnPage(page, statusId, postUrl, text, entry) {
   await sleep(dwellMs);
   const btn = await art.$(SEL.reply);
   if (!btn) return { ok: false, note: '回复按钮未找到' };
+  const targetHandle = (((postUrl || '').match(/\/([^/]+)\/status\//) || [])[1] || (entry && entry.targetHandle) || '').toLowerCase() || null;
   await humanClick(page, btn);
-  await page.waitForSelector(SEL.replyBox, { timeout: 10000 }).catch(() => { });
-  await sleep(2500);
-  if (!(await page.$(SEL.replyBox))) return { ok: false, note: '输入框未出现' };
-  if (!(await typeReply(page, text))) return { ok: false, note: '输入失败' };
+  // 等"绑定回复上下文"出现（10-22：原只等任意输入框——/home 主发帖框恒存在，检查形同虚设）
+  let gate = null;
+  for (let i = 0; i < 6; i++) {
+    await sleep(2000);
+    gate = await page.evaluate(probeReplyComposer, String(statusId), targetHandle).catch(() => null);
+    if (gate && gate.ok) break;
+  }
+  if (!gate || !gate.ok) return { ok: false, note: 'composer无回复绑定:' + ((gate && gate.note) || '探针异常') };
+  if (!(await typeReply(page, text, gate.mode))) return { ok: false, note: '输入失败' };
   await sleep(800);
-  const r = await submitReply(page);
+  const r = await submitReply(page, statusId, targetHandle);
+  if (typeof r === 'string' && r.indexOf('unbound:') === 0) return { ok: false, note: '提交前绑定丢失:' + r.slice(8) };
   return { ok: r === true, unknown: r === 'unknown', raw: r };
 }
 async function postOnPage(page, text) {
@@ -356,6 +404,8 @@ if (WATCHDOG) {
         if (DRY) { LOG(`[DRY] 应回复 @${it.author} 的通知 ${it.href}`); st.seenNotifs[key] = nowIso(); continue; }
         const postUrl = 'https://x.com' + it.href;
         const statusId = (it.href.match(/status\/(\d+)/) || [])[1];
+        // 10-22 入口守卫（对齐 inbox-reply.js 已有写法）：链接提取不出 statusId 的通知不进入任何后续流程
+        if (!statusId) { st.seenNotifs[key] = nowIso(); saveSt(st); audit({ action: 'inboxSkip', target: it.author, note: 'badlink:通知链接无法提取statusId', href: String(it.href).slice(0, 80) }); continue; }
         // ── 分场景双阈值（10-21 codex 裁决版 B，用户拍板）：招呼 ≤12 硬门 / 轻内容 ≤20 硬门 / 实质提问转人工待办 ──
         const txt0 = (it.txt || '').replace(/^(@\w+\s*)+/, '').trim();
         const visLen = (s) => [...String(s)].length; // 字素级长度（codex 指出：JS length 把 emoji 算 2 码元，口径用字素）
@@ -465,8 +515,8 @@ if (WATCHDOG) {
         if (DRY) { LOG(`[DRY] 应评论 @${p.author}: ${qc.cleaned.slice(0, 30)}…`); continue; }
         // 动作隔离（10-20 用户建议）：每个动作独立临时页+用完即关，与搜索页状态彻底解耦；瞬态错误重试一次
         const postUrl = 'https://x.com' + (p.link || ('/i/web/status/' + p.id));
-        let rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned, { srcLen: [...(p.text || '')].length })));
-        if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(p.author); pushReplyHistory(qc.cleaned); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
+        let rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned, { srcLen: [...(p.text || '')].length, targetHandle: p.author })));
+        if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(p.author); pushReplyHistory(qc.cleaned); queueVerify({ text: qc.cleaned, statusId: p.id, target: p.author, source: 'patrolReply' }); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
         else audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: 'failed', note: rr.note });
         if (rr.ok && usedToday('follow') < RC.followCapDay) {
           const fo = await withTempPage(browser, (pg) => retryTransient(() => followOnPage(pg, p.author)));
@@ -575,18 +625,24 @@ if (WATCHDOG) {
         if (q.sendAt > Date.now()) continue;
         sendQueue.splice(i, 1);
         if (q.kind === 'replyInbox') {
+          // 10-22 发送前守卫：statusId 缺失/非法=拒发（防"找不到目标帖还发帖"类异常路径；glm 实证现代码虽失败安全，守卫消除观测盲区）
+          if (!q.statusId || !/^\d+$/.test(String(q.statusId))) {
+            audit({ action: 'inboxReply', target: q.author, status: 'failed', note: 'statusId缺失拒发', postUrl: q.postUrl });
+            st.pendingInbox = (st.pendingInbox || []).filter((x) => !(x.statusId === q.statusId && x.text === q.text)); saveSt(st);
+            continue;
+          }
           // 队列发送也包瞬态重试+兜底捕获（10-20：裸 replyOnPage 抛 ProtocolError 会把条目吃掉并冒泡打断主循环）；
           // 且走独立临时页（对照实锤：长期停在通知页的 pageReply 会 wedge，临时页从未卡过）
           // 10-21 bug2 修复：风控 toast 在临时页上读（原查 pageReply 常驻页=永远读不到，风控信号漏检）；
-          // 成功/不明都写回复历史（防复读），并从持久化待发里移除（bug5 配套）
+          // 成功/不明都写回复历史（防复读），并从持久化待发里移除（bug5 配套；10-22 改复合键——statusId 缺失时原单键比较会误删整组）
           const rr = await withTempPage(browser, async (pg) => {
-            const r2 = await retryTransient(() => replyOnPage(pg, q.statusId, q.postUrl, q.text, { srcLen: [...(q.srcText || '')].length }));
+            const r2 = await retryTransient(() => replyOnPage(pg, q.statusId, q.postUrl, q.text, { srcLen: [...(q.srcText || '')].length, targetHandle: q.author }));
             const risk = await riskToast(pg).catch(() => null); // 页关前读走 toast
             return { ...r2, risk };
           }).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
-          if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(q.author); pushReplyHistory(q.text); audit({ action: 'inboxReply', target: q.author, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
-          else audit({ action: 'inboxReply', target: q.author, status: 'failed', note: rr.note });
-          st.pendingInbox = (st.pendingInbox || []).filter((x) => x.statusId !== q.statusId); saveSt(st);
+          if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(q.author); pushReplyHistory(q.text); queueVerify({ text: q.text, statusId: q.statusId, target: q.author, source: 'inboxReply' }); audit({ action: 'inboxReply', target: q.author, statusId: q.statusId, postUrl: q.postUrl, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
+          else audit({ action: 'inboxReply', target: q.author, statusId: q.statusId, postUrl: q.postUrl, status: 'failed', note: rr.note });
+          st.pendingInbox = (st.pendingInbox || []).filter((x) => !(x.statusId === q.statusId && x.text === q.text)); saveSt(st);
           if (rr.risk) { const lg = loadLedger(); lg.meta.abortedToday = today(); lg.meta.abortReason = '风控toast(光速回复): ' + rr.risk; writeJson(LEDGER_FILE, lg); aborted = true; audit({ action: 'abort', note: '光速回复: ' + rr.risk }); LOG('⚠ 风控 toast，当日熔断: ' + rr.risk); break; }
         } else if (q.kind === 'cloud') {
           if (usedToday('postCloud') >= RC.postCapDay) { audit({ action: 'cloudPost', status: 'skipped', note: '云帖帽满' }); continue; }

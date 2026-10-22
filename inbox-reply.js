@@ -108,14 +108,44 @@ const unlock = (f) => { try { fs.unlinkSync(f); } catch { } };
 
 // ── 回复对方那条评论（executor.replyToPost 同流程）+ 临时页 bio 抓取 ──
 const SEL = { article: 'article[data-testid="tweet"]', reply: '[data-testid="reply"]', replyBox: '[data-testid="tweetTextarea_0"]', toast: '[data-testid="toast"]' };
+// 回复上下文绑定探针（10-22"回复变独立帖"事故修复，与 resident.js 同款）：
+//   弹窗必含父帖 article（独立发帖弹窗没有——10-22 只读探针实测）；无弹窗仅接受目标帖 permalink 内联框
+//   /home 主发帖框(tweetTextarea_0+tweetButtonInline 常驻)=独立帖通道，硬性拒发
+function probeReplyComposer(sid, handle) {
+  const boxSel = '[data-testid="tweetTextarea_0"]';
+  const dlg = document.querySelector('[role="dialog"]');
+  if (dlg && dlg.querySelector(boxSel)) {
+    const art = dlg.querySelector('article');
+    if (!art) return { ok: false, note: 'dialog无父帖卡片(独立发帖弹窗)' };
+    if (handle) {
+      const hit = [...art.querySelectorAll('a[href^="/"]')].some((a) => ((a.getAttribute('href') || '').split('/')[1] || '').toLowerCase() === handle);
+      if (!hit) return { ok: false, note: 'dialog父帖作者非@' + handle };
+    }
+    return { ok: true, mode: 'dialog' };
+  }
+  const m = location.pathname.match(/^\/[^/]+\/status\/(\d+)/);
+  if (m && sid && m[1] === String(sid) && document.querySelector(boxSel)) return { ok: true, mode: 'inline' };
+  return { ok: false, note: '无绑定composer(' + location.pathname + ')' };
+}
+// 误发独立帖旁证登记（10-22）：回复成功即登记，verify-reply.js 定时消费，双端点确认才告警进人工待办，不自动处置
+function queueVerify(entry) {
+  const f = path.join(STATE_DIR, `pending-verify-${ACCOUNT}.json`);
+  let list = []; try { list = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { }
+  list.push({ at: nowIso(), text: String(entry.text || '').slice(0, 80), statusId: entry.statusId || null, target: entry.target || null, source: entry.source || null, checks: 0 });
+  fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(f, JSON.stringify(list.slice(-50), null, 2));
+}
 async function withTempPage(browser, fn) {
   const pg = await browser.newPage();
   pg.on('dialog', (d) => d.accept().catch(() => { }));
   try { return await fn(pg); } finally { try { await pg.close(); } catch { } }
 }
 async function replyToComment(page, postUrl, statusId, text) {
+  // 10-22 入口守卫：statusId 非法=硬性拒发
+  if (!statusId || !/^\d+$/.test(String(statusId))) return { ok: false, note: 'statusId非法:' + String(statusId) };
   try { await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); await page.waitForSelector(SEL.article, { timeout: 45000 }); }
   catch { return { ok: false, note: '页面加载失败' }; }
+  // 10-22 落地校验：被 X 软重定向到 /home 时后续检查全部形同虚设（主发帖框常驻）→独立帖通道；视为失败
+  if (!(page.url() || '').includes('/status/' + statusId)) return { ok: false, note: '落地被重定向:' + (page.url() || '').slice(0, 60) };
   await sleep(2000 + Math.random() * 2500);
   let art = null;
   for (const a of await page.$$(SEL.article)) {
@@ -124,22 +154,31 @@ async function replyToComment(page, postUrl, statusId, text) {
   if (!art) return { ok: false, note: '按 statusId 未找到目标帖' };
   const btn = await art.$(SEL.reply);
   if (!btn) return { ok: false, note: '回复按钮未找到' };
+  const targetHandle = (((postUrl || '').match(/\/([^/]+)\/status\//) || [])[1] || '').toLowerCase() || null;
   try { const bb = await btn.boundingBox(); if (bb) await page.mouse.move(bb.x + bb.width * 0.4, bb.y + bb.height * 0.5, { steps: 5 }); } catch { }
   await btn.click();
-  await page.waitForSelector(SEL.replyBox, { timeout: 10000 }).catch(() => { });
-  await sleep(2500);
-  if (!(await page.$(SEL.replyBox))) return { ok: false, note: '输入框未出现' };
-  const typed = await page.evaluate((sel, t) => {
-    const all = document.querySelectorAll(sel);
-    const el = document.querySelector('[role="dialog"] ' + sel) || all[all.length - 1];
+  // 等"绑定回复上下文"出现（10-22：原只等任意输入框——/home 主发帖框恒存在，检查形同虚设）
+  let gate = null;
+  for (let i = 0; i < 6; i++) {
+    await sleep(2000);
+    gate = await page.evaluate(probeReplyComposer, String(statusId), targetHandle).catch(() => null);
+    if (gate && gate.ok) break;
+  }
+  if (!gate || !gate.ok) return { ok: false, note: 'composer无回复绑定:' + ((gate && gate.note) || '探针异常') };
+  const typed = await page.evaluate((sel, t, m) => {
+    // 严格按闸给的作用域取框（10-22：旧兜底 all[last] 会把文字粘进 /home 主发帖框）
+    const el = m === 'dialog' ? document.querySelector('[role="dialog"] ' + sel) : document.querySelector(sel);
     if (!el) return false;
     el.focus();
     const dt = new DataTransfer(); dt.setData('text/plain', t);
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
     return true;
-  }, SEL.replyBox, text).catch(() => false);
+  }, SEL.replyBox, text, gate.mode).catch(() => false);
   if (!typed) return { ok: false, note: '输入失败' };
   await sleep(800);
+  // 提交前绑定核验（10-22：宁可漏回，不可错发独立帖）
+  const g2 = await page.evaluate(probeReplyComposer, String(statusId), targetHandle).catch(() => null);
+  if (!g2 || !g2.ok) return { ok: false, note: '提交前绑定丢失:' + ((g2 && g2.note) || '探针异常') };
   const hasDialog = await page.evaluate(() => !!document.querySelector('[role="dialog"]')).catch(() => false);
   const clicked = await page.evaluate(() => {
     const dlg = document.querySelector('[role="dialog"]');
@@ -269,6 +308,7 @@ async function replyToComment(page, postUrl, statusId, text) {
                 st.perUser.counts[it.author.toLowerCase()] = uc + 1;
                 st.userRepliesTotal = st.userRepliesTotal || {}; st.userRepliesTotal[it.author.toLowerCase()] = (st.userRepliesTotal[it.author.toLowerCase()] || 0) + 1;
                 ledgerRecordReply(); recordReply({ targetHandle: it.author, statusId, text: tc.cleaned }); syncContactsReply({ targetHandle: it.author });
+                queueVerify({ text: tc.cleaned, statusId, target: it.author, source: 'inboxReply-模板' });
                 stats.replied++; stats.greetTpl++;
                 log({ action: 'execute', type: 'reply', kind: 'inbox', id: `inbox-${statusId}`, target: it.author, status: 'done', note: '模板', text: tc.cleaned.slice(0, 60) });
                 console.log(`✅[模板] 已回 @${it.author}: ${tc.cleaned}`);
@@ -325,6 +365,7 @@ async function replyToComment(page, postUrl, statusId, text) {
           st.perUser.counts[it.author.toLowerCase()] = uc + 1;
           st.userRepliesTotal = st.userRepliesTotal || {}; st.userRepliesTotal[it.author.toLowerCase()] = (st.userRepliesTotal[it.author.toLowerCase()] || 0) + 1;
           ledgerRecordReply(); recordReply({ targetHandle: it.author, statusId, text: qc.cleaned }); syncContactsReply({ targetHandle: it.author });
+          queueVerify({ text: qc.cleaned, statusId, target: it.author, source: 'inboxReply-LLM' });
           stats.replied++;
           log({ action: 'execute', type: 'reply', kind: 'inbox', id: `inbox-${statusId}`, target: it.author, status: 'done', text: qc.cleaned.slice(0, 60) });
           console.log(`✅ 已回 @${it.author}: ${qc.cleaned}`);

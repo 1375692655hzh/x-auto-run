@@ -184,19 +184,52 @@ async function readToast(page) {
   return page.evaluate((sel) => { const t = document.querySelector(sel); return t ? (t.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80) : null; }, SEL.toast).catch(() => null);
 }
 async function riskToast(page) { const t = await readToast(page); return (t && RISK_TOAST.test(t)) ? t : null; }
-async function typeReply(page, text) {
-  return page.evaluate((sel, t) => {
-    const all = document.querySelectorAll(sel);
-    const el = document.querySelector('[role="dialog"] ' + sel) || all[all.length - 1];
+// 回复上下文绑定探针（10-22"回复变独立帖"事故修复，与 resident.js 同款）：
+//   弹窗必含父帖 article（独立发帖弹窗没有——10-22 只读探针实测）；无弹窗仅接受目标帖 permalink 内联框
+//   /home 主发帖框(tweetTextarea_0+tweetButtonInline 常驻)=独立帖通道，硬性拒发
+function probeReplyComposer(sid, handle) {
+  const boxSel = '[data-testid="tweetTextarea_0"]';
+  const dlg = document.querySelector('[role="dialog"]');
+  if (dlg && dlg.querySelector(boxSel)) {
+    const art = dlg.querySelector('article');
+    if (!art) return { ok: false, note: 'dialog无父帖卡片(独立发帖弹窗)' };
+    if (handle) {
+      const hit = [...art.querySelectorAll('a[href^="/"]')].some((a) => ((a.getAttribute('href') || '').split('/')[1] || '').toLowerCase() === handle);
+      if (!hit) return { ok: false, note: 'dialog父帖作者非@' + handle };
+    }
+    return { ok: true, mode: 'dialog' };
+  }
+  const m = location.pathname.match(/^\/[^/]+\/status\/(\d+)/);
+  if (m && sid && m[1] === String(sid) && document.querySelector(boxSel)) return { ok: true, mode: 'inline' };
+  return { ok: false, note: '无绑定composer(' + location.pathname + ')' };
+}
+// 误发独立帖旁证登记（10-22）：回复 done/unknown 即登记，verify-reply.js 定时消费，双端点确认才告警进人工待办，不自动处置
+function queueVerify(entry) {
+  const f = path.join(STATE_DIR, `pending-verify-${ACCOUNT}.json`);
+  let list = []; try { list = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { }
+  list.push({ at: new Date().toISOString(), text: String(entry.text || '').slice(0, 80), statusId: entry.statusId || null, target: entry.target || null, source: entry.source || null, checks: 0 });
+  fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(f, JSON.stringify(list.slice(-50), null, 2));
+}
+async function typeReply(page, text, mode) {
+  return page.evaluate((sel, t, m) => {
+    // 严格按闸给的作用域取框（10-22：旧兜底 all[last] 会把文字粘进 /home 主发帖框）；any=发帖/其他流程用
+    const el = m === 'dialog' ? document.querySelector('[role="dialog"] ' + sel)
+      : m === 'inline' ? document.querySelector(sel)
+      : (document.querySelector('[role="dialog"] ' + sel) || document.querySelector(sel));
     if (!el) return false;
     el.focus();
     const dt = new DataTransfer();
     dt.setData('text/plain', t);
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
     return true;
-  }, SEL.replyBox, text).catch(() => false);
+  }, SEL.replyBox, text, mode || 'any').catch(() => false);
 }
-async function submitReply(page) {
+async function submitReply(page, sid, handle) {
+  // 提交前绑定核验（10-22：宁可漏回，不可错发独立帖；发帖流程不传 sid 跳过此闸）
+  if (sid) {
+    const g = await page.evaluate(probeReplyComposer, String(sid), handle || null).catch(() => null);
+    if (!g || !g.ok) return 'unbound:' + ((g && g.note) || '探针异常');
+  }
   const hasDialog = await page.evaluate(() => !!document.querySelector('[role="dialog"]')).catch(() => false);
   const clicked = await page.evaluate(() => {
     const dlg = document.querySelector('[role="dialog"]');
@@ -223,9 +256,14 @@ async function submitReply(page) {
   }
   return false;
 }
-async function gotoFeed(page, url, tries = 2) {
+async function gotoFeed(page, url, tries = 2, expectSid) {
   for (let i = 0; i < tries; i++) {
-    try { await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }); await page.waitForSelector(SEL.article, { timeout: 45000 }); return true; }
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }); await page.waitForSelector(SEL.article, { timeout: 45000 });
+      // 10-22 落地校验：目标帖页被 X 软重定向到 /home 时，后续检查全部形同虚设（主发帖框常驻）→独立帖通道；视为失败
+      if (expectSid && !(page.url() || '').includes('/status/' + expectSid)) { if (i < tries - 1) { await sleep(3000); continue; } return false; }
+      return true;
+    }
     catch { if (i < tries - 1) await sleep(3000); }
   }
   return false;
@@ -238,7 +276,9 @@ async function findArticleByStatus(page, statusId) {
 }
 // 按 statusId 定位目标帖再回复（不取 arts[0]——审计指出的坑）
 async function replyToPost(page, entry) {
-  if (!(await gotoFeed(page, entry.postUrl))) return { ok: false, note: '页面加载失败' };
+  // 10-22 入口守卫：statusId 非法=硬性拒发
+  if (!entry.statusId || !/^\d+$/.test(String(entry.statusId))) return { ok: false, note: 'statusId非法:' + String(entry.statusId) };
+  if (!(await gotoFeed(page, entry.postUrl, 2, entry.statusId))) return { ok: false, note: '页面加载失败/落地被重定向' };
   // 10-21 P1-⑤：读帖停顿∝原帖字数（fullwin 真人节奏移植）——短帖扫一眼、长帖读完，150 字封顶 ×2.2
   const dwellF = entry.targetLen ? Math.min(2.2, 0.6 + entry.targetLen / 150) : 1;
   await gsleep([CFG.pacing.readDwellGaussMs[0] * dwellF, CFG.pacing.readDwellGaussMs[1] * dwellF]);
@@ -248,14 +288,21 @@ async function replyToPost(page, entry) {
   if (await art.evaluate((el) => !!el.querySelector('[data-testid="tweetPhoto"], [data-testid="videoPlayer"]')).catch(() => false)) return { ok: false, note: '带媒体帖不回（10-20 拍板）' };
   const btn = await art.$(SEL.reply);
   if (!btn) return { ok: false, note: '回复按钮未找到' };
+  const targetHandle = (entry.targetHandle || ((entry.postUrl || '').match(/\/([^/]+)\/status\//) || [])[1] || '').toLowerCase() || null;
   await humanClick(page, btn);
-  await page.waitForSelector(SEL.replyBox, { timeout: 10000 }).catch(() => { });
-  await sleep(2500);
-  if (!(await page.$(SEL.replyBox))) return { ok: false, note: '输入框未出现' };
-  if (!(await typeReply(page, entry.text))) return { ok: false, note: '输入失败' };
+  // 等"绑定回复上下文"出现（10-22：原只等任意输入框——/home 主发帖框恒存在，检查形同虚设）
+  let gate = null;
+  for (let i = 0; i < 6; i++) {
+    await sleep(2000);
+    gate = await page.evaluate(probeReplyComposer, String(entry.statusId), targetHandle).catch(() => null);
+    if (gate && gate.ok) break;
+  }
+  if (!gate || !gate.ok) return { ok: false, note: 'composer无回复绑定:' + ((gate && gate.note) || '探针异常') };
+  if (!(await typeReply(page, entry.text, gate.mode))) return { ok: false, note: '输入失败' };
   await sleep(800);
-  const r = await submitReply(page); // true | 'unknown' | false | 'disabled'
-  return { ok: r === true, unknown: r === 'unknown', note: r === 'disabled' ? '发布按钮不可点(超限/禁用)' : (r === false ? '点击后无成功气泡' : undefined), raw: r };
+  const r = await submitReply(page, entry.statusId, targetHandle); // true | 'unknown' | false | 'disabled' | 'unbound:...'
+  const unbound = typeof r === 'string' && r.indexOf('unbound:') === 0;
+  return { ok: r === true, unknown: r === 'unknown', note: unbound ? '提交前绑定丢失:' + r.slice(8) : r === 'disabled' ? '发布按钮不可点(超限/禁用)' : (r === false ? '点击后无成功气泡' : undefined), raw: r };
 }
 async function followUser(page, handle2) {
   if (!(await gotoFeed(page, 'https://x.com/' + handle2))) return { ok: false, note: '主页加载失败' };
@@ -573,8 +620,8 @@ function executeAction(page, entry) {
       }
       if (!r.ok && !r.unknown && transient) r.note = (r.note || '') + '（瞬态重试3次仍败）';
 
-      if (r.ok) { e.status = 'done'; e.result = SIMULATE ? 'simulated' : 'ok'; done += 1; stats.executed.push(e.id); if (e.type === 'reply') { syncContacts(e, 'reply'); recordReply(e); } if (e.type === 'follow') syncContacts(e, 'follow'); }
-      else if (r.unknown) { e.status = 'unknown'; e.result = '结果不明（占额度，禁重试，待核）: ' + (r.note || ''); stats.unknown.push(e.id); }
+      if (r.ok) { e.status = 'done'; e.result = SIMULATE ? 'simulated' : 'ok'; done += 1; stats.executed.push(e.id); if (e.type === 'reply') { syncContacts(e, 'reply'); recordReply(e); if (!SIMULATE) queueVerify({ text: e.text, statusId: e.statusId, target: e.targetHandle, source: 'executor:' + (e.kind || 'reply') }); } if (e.type === 'follow') syncContacts(e, 'follow'); }
+      else if (r.unknown) { e.status = 'unknown'; e.result = '结果不明（占额度，禁重试，待核）: ' + (r.note || ''); stats.unknown.push(e.id); if (e.type === 'reply' && !SIMULATE) queueVerify({ text: e.text, statusId: e.statusId, target: e.targetHandle, source: 'executor-unknown:' + (e.kind || 'reply') }); }
       // 关注幂等（10-18 条件回关）：实际已关注过的人按钮不出现，算完成不计失败（防误触连续失败熔断）
       else if (e.type === 'follow' && /可能已关注/.test(r.note || '')) {
         e.status = 'done'; e.result = '已关注过（幂等）'; done += 1; stats.executed.push(e.id);

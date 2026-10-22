@@ -79,7 +79,73 @@ async function checkOne(key) {
   console.log(`[${key}] 本窗抽查：可见 ${visible}/${results.length}`);
 }
 
+// ── 误发独立帖旁证核查（10-22"回复变独立帖"事故配套）：消费 resident/executor/inbox-reply 发送成功时登记的 pending-verify-<账号>.json
+// 双端点确认制（用户拍板：FxTwitter 有抽风，不作唯一判据引导操作）：
+//   ①时间线找到文本匹配帖且非回复 → ②/2/status/<id> 直查仍无 replying_to → 才告警进人工待办（不自动删除/不熔断）
+//   拉不到/匹配不到/两端点不一致 = 不确定，不写结论（unknown≠异常 铁律）；重查 4 次或超 24h 丢弃留痕
+async function consumePendingVerify(key) {
+  const f = path.join(STATE_DIR, `pending-verify-${key}.json`);
+  if (!fs.existsSync(f)) return;
+  const acct = CFG.accounts.find((a) => a.key === key);
+  if (!acct) { writeJson(f, []); return; }
+  const HANDLE = acct.handle;
+  const audit2 = (obj) => fs.appendFileSync(path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`), JSON.stringify({ at: new Date().toISOString(), task: 'verifyReply', account: key, ...obj }) + '\n');
+  const list = readJson(f, []);
+  if (!list.length) return;
+  const keep = [];
+  const norm = (s) => String(s || '').replace(/^(@\w+\s*)+/, '').replace(/\s+/g, '').slice(0, 12);
+  for (const e of list) {
+    const ageMs = Date.now() - (Date.parse(e.at || 0) || 0);
+    if (ageMs < 10 * 60000) { keep.push(e); continue; } // 等 FxTwitter 索引落地
+    // 探针①：本人带回复时间线找文本匹配帖（失败重试 1 次）
+    let hit = null, fetchOk = false;
+    for (let a = 1; a <= 2 && !hit; a++) {
+      const tl = await getJSON(`${API}/2/profile/${HANDLE}/statuses?with_replies=1`);
+      if (tl.data && !tl.err) {
+        fetchOk = true;
+        const mine = (tl.data.results || []).filter((x) => ((x.author || {}).screen_name || '').toLowerCase() === HANDLE.toLowerCase());
+        const b = norm(e.text);
+        hit = mine.find((x) => { const a1 = norm(x.text); return a1 && b && (a1.includes(b) || b.includes(a1)); }) || null;
+      }
+      if (!hit && a === 1) await sleep(8000);
+    }
+    if (hit) {
+      if (hit.is_reply || hit.replying_to) { audit2({ action: 'replyVerify', status: 'mounted', target: e.target, source: e.source, note: '已挂载✓' }); continue; } // 正常回复，丢弃
+      // 探针②：直查该帖确认（防时间线端点抽风误报）
+      await sleep(5000);
+      const c = await getJSON(`${API}/2/status/${hit.id}`);
+      const tw = c.data && !c.err ? (c.data.tweet || c.data) : null;
+      const twReal = tw && (tw.id || tw.text) ? tw : null;
+      if (twReal && !(twReal.is_reply || twReal.replying_to)) {
+        const todoFile = path.join(STATE_DIR, `human-todo-${key}.json`);
+        let todo = { pending: [] };
+        try { todo = JSON.parse(fs.readFileSync(todoFile, 'utf8')); if (!Array.isArray(todo.pending)) todo.pending = []; } catch { }
+        todo.pending.push({ at: new Date().toISOString(), kind: 'bugStandalone', author: e.target, text: '⚠回复变独立帖(双端点确认): ' + String(e.text).slice(0, 60), postUrl: `https://x.com/${HANDLE}/status/${hit.id}`, statusId: String(hit.id), status: 'pending', note: `本应回复 @${e.target}（目标帖 ${e.statusId}），请人工核查后删除` });
+        writeJson(todoFile, todo);
+        audit2({ action: 'bugStandalone', target: e.target, statusId: e.statusId, leakedId: String(hit.id), source: e.source, text: String(e.text).slice(0, 40) });
+        LOG(`⚠ [${key}] 双端点确认误发独立帖 ${hit.id}（本应回 @${e.target}），已进人工待办`);
+        continue; // 丢弃（已告警）
+      }
+      // 直查抽风/两端点不一致 → 不确定，留待下轮
+      e.checks = (e.checks || 0) + 1;
+      if (e.checks >= 4 || ageMs > 24 * 3600000) { audit2({ action: 'replyVerify', status: 'inconclusive', target: e.target, note: '时间线疑独立帖但直查不确定，放弃（不写结论）' }); continue; }
+      keep.push(e); continue;
+    }
+    if (!fetchOk) { keep.push(e); continue; } // 端点抽风：不计次数，下轮再试
+    // 拉取成功但没匹配到：索引未落地/帖未发出/被隐藏——不确定
+    e.checks = (e.checks || 0) + 1;
+    if (e.checks >= 4 || ageMs > 24 * 3600000) { audit2({ action: 'replyVerify', status: 'inconclusive', target: e.target, note: '多次未匹配到发出帖（未发出/索引缺失/被隐藏皆有可能），不写结论' }); continue; }
+    keep.push(e);
+  }
+  writeJson(f, keep);
+}
+
 (async () => {
   if (fs.existsSync(path.join(STATE_DIR, 'PAUSE'))) { console.error('PAUSE 生效中，退出'); return; }
   for (const key of RUN_KEYS) { try { await checkOne(key); } catch (e) { console.error(`[${key}] 异常: ${e.message}`); } await sleep(2000); }
+  // 消费全部账号的 pending-verify（不限 RUN_KEYS：fullwin 常驻/executor/inbox-reply 都会登记；纯 HTTP 只读，PAUSE 账号也照查——人工接管期更需要）
+  for (const f of fs.existsSync(STATE_DIR) ? fs.readdirSync(STATE_DIR) : []) {
+    const m = f.match(/^pending-verify-(.+)\.json$/);
+    if (m) { try { await consumePendingVerify(m[1]); } catch (e) { console.error(`[verify ${m[1]}] 异常: ${e.message}`); } await sleep(1500); }
+  }
 })().catch((e) => { console.error(e.message || e); process.exitCode = 1; });
