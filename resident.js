@@ -575,12 +575,36 @@ if (WATCHDOG) {
         // 价值预判（10-21 批3②）：灌水帖不硬凑
         const worth = await judgeWorthiness({ post: p.text, author: p.author }).catch(() => '值');
         if (worth === '不值') { audit({ action: 'patrolSkip', target: p.author, note: '价值预判：灌水/零信息' }); continue; }
-        // 10-22 拍板文案规则：CTA 轮换池（25% 无 CTA 直接收尾）；禁回访/串门/回踩类承诺（两号无串门模块）；教师爷刹车（不评判对方运营）
-        const CTA_POOL = ['收尾自然带一句"常来往"类互动引导', '收尾带"评论区接着聊"类引导', '收尾带"互相关注"类引导', '收尾不带任何引导，内容说完就收'];
-        const cta = CTA_POOL[randi(0, CTA_POOL.length - 1)];
-        const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: `这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注（不要声称已关注）。${cta}。禁止承诺"回访/串门/回踩"（我们不去别人主页互动）。只聊内容和盘面：不给对方的账号运营提建议、不评判对方怎么运营。`, history: recentHistory(), channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
-        const qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [] }) : null;
+        // ── 10-22 巡逻评论优化（拍板"全部执行"）：长度分档 60%短评(10-25)/40%内容(25-45)，软上限 50 字素（超重生成一次仍超照发）；
+        // 结构去三段式；人设轻露（一句过）；互关信号 60% 携带+同作者 7 天 ≤2 次；禁回访串门回踩；教师爷刹车；"回的是人"铁律 ──
+        const visLenG = (s) => [...String(s || '')].length;
+        const tier = Math.random() < 0.6 ? 'short' : 'content';
+        const tierRule = tier === 'short' ? '本档=短评：10-25 字素，像随手接话' : '本档=内容评：25-45 字素，必须点到对方帖子的具体内容';
+        // 互关信号骰子（同作者 7 天 ≤2 次）
+        st.mutualSignal = st.mutualSignal || {};
+        const sigKey = (p.author || '').toLowerCase();
+        const sigs = (st.mutualSignal[sigKey] || []).filter((t) => Date.parse(t) > Date.now() - 7 * 86400000);
+        st.mutualSignal[sigKey] = sigs;
+        const carrySignal = sigs.length < 2 && Math.random() < 0.6;
+        const tailRule = carrySignal
+          ? '收尾自然带互相关注的邀请（或"常来往"级轻引导）'
+          : (Math.random() < 0.5 ? '收尾轻带"常来往/评论区聊"级引导' : '内容说完就收，不带任何引导');
+        const brief = `这是互关话题帖，写给陌生帖主的评论。${tierRule}。
+铁律：回的是"人"——先接住对方的情绪/状态，其次才是内容。
+结构禁令：不要"接话+自我介绍+引导关注"三段式；允许纯内容回复（就事论事）；自我介绍全条最多一句带过（"我也在盯盘"级），不许"我是做XX的"式自报家门。
+${carrySignal ? '本条可自然表达希望互相关注（不要声称已关注——我们是先回后关）' : '本条不提互关/关注'}。
+禁止承诺"回访/串门/回踩"（我们不去别人主页互动）。只聊内容和盘面：不给对方的账号运营提建议、不评判对方怎么运营。
+语感参考（只学语感不学结构）：'出摊这词对味''闪闪发光这句我收下了'——口语、短促、有活人感。${tailRule}。`;
+        let r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: recentHistory(), channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
+        let qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [] }) : null;
+        if (qc && qc.ok && visLenG(qc.cleaned) > 50) { // 软上限：重生成一次压缩，仍超照发（交付零影响纪律）
+          audit({ action: 'patrolLen', target: p.author, note: `${tier}档超长${visLenG(qc.cleaned)}字素重生成` });
+          r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: brief + `上一版太长（${visLenG(qc.cleaned)}字素），保留意思压到 50 字素以内。`, history: recentHistory(), channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
+          qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [] }) : null;
+          if (qc && qc.ok && visLenG(qc.cleaned) > 50) audit({ action: 'patrolLen', target: p.author, note: `仍超${visLenG(qc.cleaned)}字素，照发` });
+        }
         if (!(qc && qc.ok)) { audit({ action: 'patrolGen', target: p.author, note: `生成未过门(${qc ? qc.reason : 'LLM失败'})，跳过` }); continue; }
+        if (carrySignal) { sigs.push(nowIso()); st.mutualSignal[sigKey] = sigs; saveSt(st); }
         if (DRY) { LOG(`[DRY] 应评论 @${p.author}: ${qc.cleaned.slice(0, 30)}…`); continue; }
         // 动作隔离（10-20 用户建议）：每个动作独立临时页+用完即关，与搜索页状态彻底解耦；瞬态错误重试一次
         const postUrl = 'https://x.com' + (p.link || ('/i/web/status/' + p.id));

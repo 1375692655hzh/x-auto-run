@@ -88,19 +88,19 @@ async function push(text) {
     const cut24 = Date.now() - 24 * 3600000;
     const TERMS = ['老师', '老哥', '朋友', '兄弟', '兄dei', '大佬', '家人', '宝子', '哥们', '伙计'];
     const CTA_WORDS = ['常来往', '多交流', '多来往', '常来常往', '回访', '串门', '互相关注', '互关'];
-    const termCnt = {}; let total = 0, emojiEnd = 0, patrolN = 0, patrolCta = 0;
+    const termCnt = {}; let total = 0, emojiEnd = 0, patrolN = 0, patrolCta = 0, pShort = 0, pMid = 0;
     for (const l of fs.readFileSync(logF, 'utf8').split('\n')) {
       let j; try { j = JSON.parse(l); } catch { continue; }
       if (!j.at || Date.parse(j.at) < cut24) continue;
       if (!/^(inboxReply|patrolReply)$/.test(j.action || '') || j.status !== 'done' || !j.text) continue;
       total++;
       for (const w of TERMS) if (j.text.includes(w)) termCnt[w] = (termCnt[w] || 0) + 1;
-      if (/[\p{Extended_Pictographic}\uFE0F][\p{Extended_Pictographic}\uFE0F\s]*$/u.test(j.text.trim())) emojiEnd++;
-      if (j.action === 'patrolReply') { patrolN++; if (CTA_WORDS.some((w) => j.text.includes(w))) patrolCta++; }
+      if (/[\p{Extended_Pictographic}﻿][\p{Extended_Pictographic}﻿\s]*$/u.test(j.text.trim())) emojiEnd++;
+      if (j.action === 'patrolReply') { patrolN++; if (CTA_WORDS.some((w) => j.text.includes(w))) patrolCta++; const vl = [...j.text].length; if (vl <= 25) pShort++; else if (vl <= 45) pMid++; }
     }
     if (total) {
       const top3 = Object.entries(termCnt).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w}×${n}`).join('/') || '无';
-      lines.push(`\n🧬 回复多样性(24h)：称呼Top3 ${top3} ｜ emoji收尾 ${Math.round(emojiEnd / total * 100)}%（目标≤30%）｜ 巡逻CTA含量 ${patrolN ? Math.round(patrolCta / patrolN * 100) : 0}%（${patrolCta}/${patrolN}）`);
+      lines.push(`\n🧬 回复多样性(24h)：称呼Top3 ${top3} ｜ emoji收尾 ${Math.round(emojiEnd / total * 100)}%（目标≤30%）｜ 巡逻CTA含量 ${patrolN ? Math.round(patrolCta / patrolN * 100) : 0}%（${patrolCta}/${patrolN}）｜ 巡逻字长 短${pShort}/中${pMid}/长${patrolN - pShort - pMid}（设计 60%短/40%中）`);
     }
   } catch { }
 

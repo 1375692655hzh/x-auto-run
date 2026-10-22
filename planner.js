@@ -243,22 +243,49 @@ async function planCommunity(ts) {
   const queuedHandles = new Set();
   for (const w of WINS) for (const e of loadQueue(w)) if (e.status !== 'skipped' && e.targetHandle) queuedHandles.add(e.targetHandle);
   const out = [];
+  const visLenP = (s) => [...String(s || '')].length; // 字素口径（10-22 对齐常驻：与 resident 巡逻同尺）
   for (const p of cands) {
     if (out.length >= cap) break;
     if (queuedHandles.has(p.author)) continue;
+    // ── 10-22 对齐常驻巡逻优化（拍板"需要对齐"）：长度分档 60/40+软上限 50（超重生成一次仍超照发）；
+    // 结构去三段式+人设轻露+互关信号 60%（同作者 7 天 ≤2 次）+禁回访串门回踩+教师爷刹车；config 提示词保留为人设基底 ──
+    const tier = Math.random() < 0.6 ? 'short' : 'content';
+    const tierRule = tier === 'short' ? '本档=短评：10-25 字素，像随手接话' : '本档=内容评：25-45 字素，必须点到对方帖子的具体内容';
+    ts.mutualSignal = ts.mutualSignal || {};
+    const sigKey = (p.author || '').toLowerCase();
+    const sigs = (ts.mutualSignal[sigKey] || []).filter((t) => Date.parse(t) > Date.now() - 7 * 86400000);
+    ts.mutualSignal[sigKey] = sigs;
+    const carrySignal = sigs.length < 2 && Math.random() < 0.6;
+    const tailRule = carrySignal
+      ? '收尾可自然提到互相关注/已关注（先关注后回复是真话）'
+      : (Math.random() < 0.5 ? '收尾轻带"常来往/评论区聊"级引导' : '内容说完就收，不带任何引导');
+    const briefDyn = `${briefOf('community')}
+
+【10-22 对齐规则】${tierRule}。回的是"人"——先接住对方的情绪/状态，其次才是内容。
+结构禁令：不要"接话+自我介绍+引导关注"三段式；允许纯内容回复；自我介绍全条最多一句带过（"我也在盯盘"级），不许自报家门式介绍。
+${carrySignal ? '本条可提互关/已关注' : '本条不提互关/关注'}。禁止承诺"回访/串门/回踩"（我们不去别人主页互动）。不给对方账号运营提建议、不评判对方运营方式。${tailRule}。`;
     // 生成失败换语气重试 1 次（10-20 拍板"交付必达"：质量门淘汰不许丢计划量；候选有 +3 缓冲，双保险）
     let qc = null;
     for (let g = 0; g < 2; g++) {
       try {
-        const r = await generateReply({ post: p.text, author: p.author, persona: PERSONA, brief: briefOf('community'), history: ts.replyHistory.slice(-8) });
+        const r = await generateReply({ post: p.text, author: p.author, persona: PERSONA, brief: briefDyn, history: ts.replyHistory.slice(-8) });
         qc = quality.check(r.text, { history: ts.replyHistory });
       } catch (err) { console.log(`  LLM 失败(@${p.author}): ${String(err.message).slice(0, 80)}`); qc = null; break; }
       if (qc.ok) break;
       console.log(`  质量门未过(@${p.author}，第${g + 1}次): ${qc.reason}${g === 0 ? '，重试' : ''}`);
     }
     if (!qc || !qc.ok) continue;
+    // 软上限 50 字素：重生成一次压缩，仍超照发（交付零影响纪律）
+    if (visLenP(qc.cleaned) > 50) {
+      try {
+        const r2 = await generateReply({ post: p.text, author: p.author, persona: PERSONA, brief: briefDyn + `上一版太长（${visLenP(qc.cleaned)}字素），保留意思压到 50 字素以内。`, history: ts.replyHistory.slice(-8) });
+        const qc2 = r2 && r2.text ? quality.check(r2.text, { history: ts.replyHistory }) : null;
+        if (qc2 && qc2.ok) { log({ action: 'communityLen', target: p.author, note: `超长${visLenP(qc.cleaned)}→${visLenP(qc2.cleaned)}${visLenP(qc2.cleaned) > 50 ? ' 仍超照发' : ''}` }); qc = qc2; }
+      } catch { }
+    }
+    if (carrySignal) { sigs.push(new Date().toISOString()); ts.mutualSignal[sigKey] = sigs; }
     out.push({ id: `${today()}-${WINDOW}-community-${baseId + out.length + 1}`, account: ACCOUNT, type: 'reply', kind: 'community', postUrl: 'https://x.com' + p.link, statusId: p.id, targetHandle: p.author, text: qc.cleaned, targetLen: (p.text || '').length, followFirst: true, window: WINDOW, status: 'planned', createdAt: new Date().toISOString() });
-    console.log(`  互关入队 @${p.author}：${qc.cleaned.slice(0, 36)}…`);
+    console.log(`  互关入队 @${p.author}（${tier}${carrySignal ? '+互关信号' : ''}）：${qc.cleaned.slice(0, 36)}…`);
     await sleep(rand(800, 1600));
   }
   return out;
