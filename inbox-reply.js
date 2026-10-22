@@ -90,6 +90,45 @@ function syncContactsReply(entry) {
     fs.writeFileSync(p, JSON.stringify(led, null, 2));
   } catch { }
 }
+// 当场回关的关系落档（10-21 拍板"才女的路"）：weFollow 落档后天然防重复
+function syncContactsFollow(entry) {
+  try {
+    const p = path.join(STATE_DIR, `contacts-${ACCOUNT}.json`);
+    if (!fs.existsSync(p)) return;
+    const led = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const h = (entry.targetHandle || '').toLowerCase(); if (!h) return;
+    const e = (led.people[h] = led.people[h] || { handle: h, name: null, firstSeen: nowIso(), updatedAt: null, sources: [], relation: { weFollow: null, theyFollow: null, mutual: false }, activity: { theirEvents: [], theirLastAt: null, ourReplies: 0, ourLastReplyAt: null }, eligibility: { blocked: null, gone: false }, score: 0, stage: 'contacted' });
+    e.relation.weFollow = { since: today(), via: 'inbox-followback' };
+    if (!e.sources.includes('inbox')) e.sources.push('inbox');
+    e.updatedAt = nowIso();
+    fs.writeFileSync(p, JSON.stringify(led, null, 2));
+  } catch { }
+}
+// ── 当场回关（10-21 用户拍板，取代台账式 7 天双条件）：回复成功→开对方主页→"关注了你"徽标在且我们未关注→回关。
+// 不查任何档案/扫描，页面按钮态即真值；关注帽与全部关注动作共用滚动 100/天；失败不硬磕（对方下次评论自然再遇）
+async function followBackIfFollowing(page, author) {
+  try {
+    await page.goto('https://x.com/' + author, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await sleep(1500 + Math.random() * 2000);
+    const badge = await page.$('[data-testid="userFollowIndicator"]').catch(() => null);
+    if (!badge) return { skip: '对方未关注我们，只回话' };
+    if (await page.$('button[data-testid$="-unfollow"]').catch(() => null)) return { skip: '已关注过' };
+    const btn = (await page.$$('button[data-testid$="-follow"]'))[0];
+    if (!btn) return { skip: '关注按钮未找到' };
+    const led = loadLedger();
+    const cap = (((CFG.executor || {}).rollingCaps || {}).follow) || 100;
+    if (((led.actions.follow || []).length) >= cap) return { skip: '滚动关注帽满(' + cap + ')' };
+    try { const bb = await btn.boundingBox(); if (bb) await page.mouse.move(bb.x + bb.width * 0.4, bb.y + bb.height * 0.5, { steps: 5 }); } catch { }
+    await btn.click();
+    await sleep(1500 + Math.random() * 1000);
+    if (await page.$('button[data-testid$="-unfollow"]').catch(() => null)) {
+      (led.actions.follow = led.actions.follow || []).push(Date.now());
+      fs.writeFileSync(path.join(STATE_DIR, `ledger-${ACCOUNT}.json`), JSON.stringify(led, null, 2));
+      return { ok: true };
+    }
+    return { fail: '点击后未生效' };
+  } catch (e) { return { fail: String(e.message).slice(0, 60) }; }
+}
 
 // ── 账号锁（同文件协议） ──
 function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
@@ -215,7 +254,7 @@ async function replyToComment(page, postUrl, statusId, text) {
 
   const lockF = DRY ? null : await lockWait();
   let browser = null, ws = null;
-  const stats = { seen: 0, fresh: 0, replied: 0, failed: 0, skippedOwn: 0, skippedCap: 0, todo: 0, greetTpl: 0 };
+  const stats = { seen: 0, fresh: 0, replied: 0, failed: 0, skippedOwn: 0, skippedCap: 0, todo: 0, greetTpl: 0, followBack: 0, fbSkip: 0, fbFail: 0 };
   try {
     const oj = await fetch(CFG.bitbrowser + '/browser/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).then((r) => r.json());
     if (!oj.success) throw new Error('开窗失败: ' + JSON.stringify(oj));
@@ -312,6 +351,12 @@ async function replyToComment(page, postUrl, statusId, text) {
                 stats.replied++; stats.greetTpl++;
                 log({ action: 'execute', type: 'reply', kind: 'inbox', id: `inbox-${statusId}`, target: it.author, status: 'done', note: '模板', text: tc.cleaned.slice(0, 60) });
                 console.log(`✅[模板] 已回 @${it.author}: ${tc.cleaned}`);
+                // 当场回关（10-21 拍板"才女的路"）：回复成功→开主页→"关注了你"徽标在且未关注→回关
+                await sleep(rand(2000, 5000));
+                const fb = await followBackIfFollowing(page, it.author);
+                if (fb.ok) { syncContactsFollow({ targetHandle: it.author }); stats.followBack++; log({ action: 'followBack', target: it.author, status: 'done', note: '回复+对方已关注→当场回关' }); console.log(`🤝 已回关 @${it.author}`); }
+                else if (fb.skip) { stats.fbSkip++; log({ action: 'followBack', target: it.author, status: 'skip', note: fb.skip }); }
+                else { stats.fbFail++; log({ action: 'followBack', target: it.author, status: 'failed', note: fb.fail }); }
                 saveSt(st); await sleep(rand(15000, 35000));
                 continue;
               }
@@ -369,6 +414,12 @@ async function replyToComment(page, postUrl, statusId, text) {
           stats.replied++;
           log({ action: 'execute', type: 'reply', kind: 'inbox', id: `inbox-${statusId}`, target: it.author, status: 'done', text: qc.cleaned.slice(0, 60) });
           console.log(`✅ 已回 @${it.author}: ${qc.cleaned}`);
+          // 当场回关（10-21 拍板"才女的路"，同模板路径）
+          await sleep(rand(2000, 5000));
+          const fb = await followBackIfFollowing(page, it.author);
+          if (fb.ok) { syncContactsFollow({ targetHandle: it.author }); stats.followBack++; log({ action: 'followBack', target: it.author, status: 'done', note: '回复+对方已关注→当场回关' }); console.log(`🤝 已回关 @${it.author}`); }
+          else if (fb.skip) { stats.fbSkip++; log({ action: 'followBack', target: it.author, status: 'skip', note: fb.skip }); }
+          else { stats.fbFail++; log({ action: 'followBack', target: it.author, status: 'failed', note: fb.fail }); }
         } else {
           st.seenNotifs[key] = { at: nowIso(), status: rr.unknown ? 'unknown' : 'failed', note: (rr.note || '').slice(0, 80) }; // unknown/failed 不重试（评论重复比漏回糟）
           stats.failed++;
@@ -386,5 +437,5 @@ async function replyToComment(page, postUrl, statusId, text) {
     saveSt(st);
   }
   log({ action: 'pollEnd', ...stats });
-  console.log(`本轮：扫 ${stats.seen}，新 ${stats.fresh}，回 ${stats.replied}（模板 ${stats.greetTpl}），转人工 ${stats.todo}，败 ${stats.failed}，自家跳过 ${stats.skippedOwn}，日帽跳过 ${stats.skippedCap}`);
+  console.log(`本轮：扫 ${stats.seen}，新 ${stats.fresh}，回 ${stats.replied}（模板 ${stats.greetTpl}），回关 ${stats.followBack}（跳过 ${stats.fbSkip} 败 ${stats.fbFail}），转人工 ${stats.todo}，败 ${stats.failed}，自家跳过 ${stats.skippedOwn}，日帽跳过 ${stats.skippedCap}`);
 })().catch((e) => { console.error(e.message || e); process.exit(1); });

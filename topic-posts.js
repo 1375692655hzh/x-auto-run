@@ -145,7 +145,7 @@ async function genOne(point, material) {
     if (!body) { audit({ action: 'topicGen', status: 'skipped', note: `${point}点槽两次未过门` }); continue; }
     const text = body + '\n\n' + TC.postTags.join(' ');
     if (DRY) { LOG(`[DRY] ${point}点槽: ${text.slice(0, 60)}…`); continue; }
-    queue.push({ id: `${today()}-topic-${ACCOUNT}-${i + 1}`, account: ACCOUNT, type: 'post', kind: 'topic-post', text, window: 'topic', postAt: new Date(postAt).toISOString(), status: 'planned', createdAt: nowIso() });
+    queue.push({ id: `${today()}-topic-${ACCOUNT}-${i + 1}`, account: ACCOUNT, type: 'post', kind: 'topic-post', text, window: 'topic', postAt: new Date(postAt).toISOString(), status: 'planned', createdAt: nowIso(), ttlMin: 1440 }); // ttlMin 1440（10-22 修复）：预制帖生命周期全天（末槽距 createdAt ~18h），executor 通用 300min 是运营窗队列安全网，曾把 10:50 后全部槽误判 TTL 过期
   }
   if (DRY) { LOG(`[DRY] 共 ${entries.length} 槽预览完毕，不写队列不拉起`); process.exit(0); }
   if (!queue.length) { audit({ action: 'topicGen', status: 'failed', note: '全部槽未过质量门，当天不发' }); process.exit(1); }
