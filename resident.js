@@ -371,6 +371,41 @@ if (WATCHDOG) {
     await fetch(CFG.bitbrowser + '/browser/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ACCT.profileId }) }).catch(() => { });
   }
 
+  // ── 光速回关（10-22 拍板方案A，fullwin/butcher 共用本文件同步生效）：光速回复发出后顺带判定——
+  // 对方主页 userFollowIndicator 徽章=对方关注我方（10-22 双侧实证：粉丝主页有/非粉丝无，testid 三语无关）；
+  // 徽章在+我方未关注→当场回关。终身去重 followBackDone；非粉标记 7 天后再查；任务不设上限（10-19 拍板），唯一约束=滚动关注帽安全网
+  async function followBackIfFan(author) {
+    const h = (author || '').toLowerCase();
+    if (!h) return;
+    st.followBackDone = st.followBackDone || {};
+    const prev = st.followBackDone[h];
+    if (prev === 'done') return;
+    if (prev && prev.indexOf('notfan-') === 0 && prev.slice(7) > new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)) return; // 7 天内查过非粉，不重复开页
+    if (usedToday('follow') >= RC.followCapDay) { audit({ action: 'followBack', target: author, status: 'skipped', note: '滚动关注帽安全网' }); return; }
+    const r = await withTempPage(browser, async (pg) => {
+      if (!(await gotoFeed(pg, 'https://x.com/' + author))) return { ok: false, note: '主页加载失败' };
+      await sleep(rand(2000, 3500));
+      const probe = await pg.evaluate(() => ({
+        fan: !!document.querySelector('[data-testid="userFollowIndicator"]'),
+        canFollow: !!document.querySelector('button[data-testid$="-follow"]'),
+        following: !!document.querySelector('button[data-testid$="-unfollow"]'),
+      })).catch(() => null);
+      if (!probe) return { ok: false, note: '主页探针失败' };
+      if (probe.following) return { ok: true, already: true };
+      if (!probe.fan) return { ok: false, notfan: true };
+      if (!probe.canFollow) return { ok: false, note: '关注按钮未找到' };
+      const btn = (await pg.$$('button[data-testid$="-follow"]'))[0];
+      await humanClick(pg, btn);
+      await sleep(1500);
+      if (await pg.$('button[data-testid$="-unfollow"]').catch(() => null)) return { ok: true };
+      return { ok: false, unknown: true, note: '回关未确认' };
+    }).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
+    if (r.ok && r.already) { st.followBackDone[h] = 'done'; saveSt(st); audit({ action: 'followBack', target: author, status: 'done', note: '已关注过' }); return; }
+    if (r.ok) { st.followBackDone[h] = 'done'; saveSt(st); ledgerRecord('follow'); audit({ action: 'followBack', target: author, status: 'done', note: '对方回复+关注双条件满足，已回关' }); LOG('光速回关 @' + author); return; }
+    if (r.notfan) { st.followBackDone[h] = 'notfan-' + today(); saveSt(st); audit({ action: 'followBack', target: author, status: 'skipped', note: '对方未关注我方（7天后再查）' }); return; }
+    audit({ action: 'followBack', target: author, status: r.unknown ? 'unknown' : 'failed', note: r.note });
+  }
+
   // ── 页1：光速回复轮询（通知页） ──
   async function pollNotifications() {
     try {
@@ -643,6 +678,8 @@ if (WATCHDOG) {
           if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(q.author); pushReplyHistory(q.text); queueVerify({ text: q.text, statusId: q.statusId, target: q.author, source: 'inboxReply' }); audit({ action: 'inboxReply', target: q.author, statusId: q.statusId, postUrl: q.postUrl, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
           else audit({ action: 'inboxReply', target: q.author, statusId: q.statusId, postUrl: q.postUrl, status: 'failed', note: rr.note });
           st.pendingInbox = (st.pendingInbox || []).filter((x) => !(x.statusId === q.statusId && x.text === q.text)); saveSt(st);
+          // 光速回关（10-22 拍板方案A）：回复先发出（速度不受影响），随后顺带判定回关
+          if ((rr.ok || rr.unknown) && !rr.risk) await followBackIfFan(q.author);
           if (rr.risk) { const lg = loadLedger(); lg.meta.abortedToday = today(); lg.meta.abortReason = '风控toast(光速回复): ' + rr.risk; writeJson(LEDGER_FILE, lg); aborted = true; audit({ action: 'abort', note: '光速回复: ' + rr.risk }); LOG('⚠ 风控 toast，当日熔断: ' + rr.risk); break; }
         } else if (q.kind === 'cloud') {
           if (usedToday('postCloud') >= RC.postCapDay) { audit({ action: 'cloudPost', status: 'skipped', note: '云帖帽满' }); continue; }
