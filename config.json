@@ -704,6 +704,25 @@
       "greetHardLen": 12,
       "lightHardLen": 20,
       "lenNote": "10-21 codex 裁决版 B（用户拍板）：招呼≤12 硬门 / 轻内容≤20 硬门 / 实质提问转人工待办队列（human-todo-<账号>.json，进飞书报告）"
+    },
+    "wcixot": {
+      "topicPosts": {
+        "enabled": true,
+        "genAt": "05:50",
+        "points": [
+          7,
+          8,
+          10,
+          13,
+          14,
+          16,
+          17,
+          19,
+          20
+        ],
+        "jitterMin": 25,
+        "note": "10-22 拍板：才女互关帖对齐 topic-posts 系统（butcher/fullwin 同款，CTA 轮换等修复自动跟随）——05:50 云端池参考+mimo 批量 9 条分时段，九整点（用户 10-22 定的 7/8/10/13/14/16/17/19/20）±0~25min 定发；六标签程序附加；互关帖三槽/九槽 mutual-post.js 同日退役"
+      }
     }
   },
   "freshData": {
