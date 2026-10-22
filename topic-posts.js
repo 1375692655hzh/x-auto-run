@@ -131,7 +131,12 @@ async function genOne(point, material) {
   for (const point of TC.points) {
     const base = new Date(); base.setHours(point % 24, 0, 0, 0); if (point >= 24) base.setDate(base.getDate() + 1);
     let postAt = base.getTime() + Math.round(rand(-TC.jitterMin, TC.jitterMin)) * 60000;
-    if (postAt < Date.now() + 8 * 60000) postAt = Date.now() + rand(8, 20) * 60000; // 过去的槽/太近的就近排
+    // 10-22 补跑防聚集：基准点已过 >70min 的槽直接放弃（补跑场景），避免 4-5 条互关帖挤在 12 分钟内发出（ spam 画像）；
+    // 正常 05:50 预制路径不受影响（首槽 06:00±jitter 最多刚错过 8min，走就近排）
+    if (postAt < Date.now() + 8 * 60000) {
+      if ((Date.now() - base.getTime()) / 60000 > 70) { LOG(`${point}点槽已过点超 70min，补跑不聚集，放弃该槽`); continue; }
+      postAt = Date.now() + rand(8, 20) * 60000; // 刚错过的槽就近排
+    }
     entries.push({ point, postAt });
   }
   entries.sort((a, b) => a.postAt - b.postAt);
