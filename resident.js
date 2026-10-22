@@ -294,13 +294,20 @@ if (WATCHDOG) {
   LOG(`常驻启动：@${ACCT.handle}，三页面（回复/巡逻/发布），LLM=${RC.llmChannel}，帖帽${RC.postCapDay} 回复帽${RC.replyCapDay}`);
 
   // 单实例守卫（10-21 事故：无守卫时一晚 5 次重复启动，新实例清页签把旧实例拆成僵尸）：
-  // 已有活实例（心跳新鲜+pid 活）则本次退出。新代码只在页面健康时写心跳，心跳新鲜=真活着
+  // 已有活实例则本次退出。两个判据：①心跳新鲜+pid 活（健康在岗）②pid 活+5min 内有启动声明
+  // （10-22 竞态修复：pid/心跳原本要等开窗+登录校验完才写，双启动窗口内互相看不见——
+  //  改为守卫通过后【立刻】写 pid+startAt 声明工位，把竞态窗口从 ~2min 压到毫秒级）
   {
     const prev = loadSt();
-    if (prev.heartbeatAt && Date.now() - Date.parse(prev.heartbeatAt) < 20 * 60000 && prev.pid && prev.pid !== process.pid) {
-      try { process.kill(prev.pid, 0); console.error(`已有活实例(pid ${prev.pid})，本次退出（防拆工位）`); process.exit(0); }
-      catch (e) { if (e.code === 'EPERM') { console.error(`已有活实例(pid ${prev.pid})，本次退出`); process.exit(0); } }
+    const hbFresh = prev.heartbeatAt && Date.now() - Date.parse(prev.heartbeatAt) < 20 * 60000;
+    const claimed = prev.pid && prev.pid !== process.pid && prev.startAt && Date.now() - Date.parse(prev.startAt) < 5 * 60000;
+    let alive = false;
+    if (claimed || (hbFresh && prev.pid && prev.pid !== process.pid)) {
+      try { process.kill(prev.pid, 0); alive = true; } catch (e) { alive = e.code === 'EPERM'; }
     }
+    if (alive) { console.error(`已有活实例(pid ${prev.pid})，本次退出（防拆工位）`); process.exit(0); }
+    const claim = loadSt();
+    claim.pid = process.pid; claim.startAt = nowIso(); claim.heartbeatAt = null; saveSt(claim); // 立即声明工位
   }
 
   // 工位=开窗+连接+两工作页+登录校验；启动与自愈共用（10-21：detached Frame 后原代码无任何恢复路径）
@@ -467,8 +474,9 @@ if (WATCHDOG) {
         const hasQ = /[？?]/.test(txt0);
         const isGreet = /来了|来咯|欢迎|大佬好|膜拜|互关|回关|关注你|关注了|已关注|回访|支持一波|报到|串门|顶|前排|围观|做大做强|兄弟|学习|不错|可以|强|牛|厉害|早上好|早安|晚安|好呀/.test(txt0) && visLen(txt0) <= 24 && !(hasQWord && (hasQ || visLen(txt0) > 10)); // codex 复核修正：社交问号不误杀（早上好呀？）、已关注/回访类招呼收编
         const isQuestion = (hasQWord && (hasQ || visLen(txt0) >= 6)) || /讲讲|说说|分析|解释/.test(txt0); // 问词+≥6字即实质提问（'你蓝V走的什么渠道'这类无问号短问） // 实质提问=问词+问号或够长；祈使问（讲讲/说说）无问号也算；社交问号不算
-        if (isQuestion) {
+        if (isQuestion && !RC.questionAutoReply) {
           // 实质提问不硬回短答——转人工待办队列（可见队列，不是审计一行），用户手动补答
+          // （10-22 用户拍板"以后别转人工"：fullwin 开 questionAutoReply 直接回，不再转人工；butcher/才女被动回复仍走待办）
           const todoFile = path.join(STATE_DIR, `human-todo-${ACCOUNT}.json`);
           let todo = { pending: [] };
           try { todo = JSON.parse(fs.readFileSync(todoFile, 'utf8')); if (!Array.isArray(todo.pending)) todo.pending = []; } catch { }
@@ -516,9 +524,10 @@ if (WATCHDOG) {
         const totalN = ((st.userRepliesTotal || {})[(it.author || '').toLowerCase()] || 0);
         const rel = totalN >= 5 ? '老熟人（可镜像反捧、开轻玩笑、称兄道弟）' : totalN >= 2 || userReplyCount(it.author) >= 1 ? '眼熟（可加社区黑话和 emoji）' : '陌生人（客气短句，不玩梗不称兄道弟）'; // 10-21 补修④：累计跨日+当天并行
         const target = scene === 'greet' ? `4-10 个字，像手机上顺手回的一句${greetLabel ? '（对方是' + greetLabel + '，可带上称呼）' : ''}；对方是${rel}` : `8-16 个字，一句话点到对方说的具体内容；对方是${rel}`;
+        const qNudge = (isQuestion && RC.questionAutoReply) ? '对方这条是提问/追问——正面回应：给观点或如实说（如最近盯盘忙、改天细聊），别装没看见。' : '';
         // 超长硬拒→重生成一次（保留原意压到上限，不是硬缩到极短）→仍超跳过
         // 10-21 bug3 修复：history 接真实环形缓冲（原恒空致防复读断线）；casual=true 放行无标点短句
-        const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人回应对方；回复 ${target}。风格参考（只学节奏不复用内容）：真人回复像随手打的——'哈哈，互相学习' '来了兄弟' '确实，这波我认'——口语、短促、不书面、不总结。`
+        const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人回应对方；回复 ${target}。${qNudge}风格参考（只学节奏不复用内容）：真人回复像随手打的——'哈哈，互相学习' '来了兄弟' '确实，这波我认'——口语、短促、不书面、不总结。`
           // C 同人语境递进：告知上次回他的是什么，换角度不重复套路
           + (((st.lastReplyTo || {})[(it.author || '').toLowerCase()]) ? `你上次回他的是"${(st.lastReplyTo || {})[(it.author || '').toLowerCase()]}"——换个角度接着聊，别重复套路。` : '')
           // A 称呼词日限（LLM 路径）：今天用够的词直接禁
