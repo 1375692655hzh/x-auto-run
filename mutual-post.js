@@ -190,6 +190,7 @@ async function postSlot(acc, slot) {
   const st = loadState(acc);
   let text = st.date === today() ? st.texts[idx] : null;
   if (!text) { console.log(`[${acc}] 今日预制缺失（${st.date || '无'}≠${today()}），现场生成兜底`); text = (await ensureTexts(acc, today(), 1))[0]; }
+  text = String(text).replace(/^\s*\d{4}-\d{2}-\d{2}\s*(早盘|午间|晚间|盘前|复盘|深夜)?\s*[:：,，、-]?\s*/, ''); // 10-22：LLM 偶把日期/时段标签写进正文开头（"2026-10-22 午间："），发前剥掉
   const final = `${text}\n${MP.tags.join(' ')}`;
   const wl = quality.weightedLen(final);
   if (wl > 280) { console.log(`[${acc}] 成稿超长(${wl}>280)，按 280 截标签`); }
