@@ -82,6 +82,28 @@ async function push(text) {
     lines.push(`  近6h动作: 帖${cnt('post')} 回复${cnt('reply')} 关注${cnt('follow')} 赞${cnt('like')}${cnt('postTopic') ? `（互关帖${cnt('postTopic')}/云帖${cnt('postCloud')}）` : ''}`);
   }
 
+  // 回复多样性观测（10-22 拍板）：近 24h 光速+巡逻回复的称呼词 Top3 / emoji 收尾率 / 巡逻 CTA 含量
+  try {
+    const logF = path.join(STATE_DIR, `log-${today().slice(0, 7)}.jsonl`);
+    const cut24 = Date.now() - 24 * 3600000;
+    const TERMS = ['老师', '老哥', '朋友', '兄弟', '兄dei', '大佬', '家人', '宝子', '哥们', '伙计'];
+    const CTA_WORDS = ['常来往', '多交流', '多来往', '常来常往', '回访', '串门', '互相关注', '互关'];
+    const termCnt = {}; let total = 0, emojiEnd = 0, patrolN = 0, patrolCta = 0;
+    for (const l of fs.readFileSync(logF, 'utf8').split('\n')) {
+      let j; try { j = JSON.parse(l); } catch { continue; }
+      if (!j.at || Date.parse(j.at) < cut24) continue;
+      if (!/^(inboxReply|patrolReply)$/.test(j.action || '') || j.status !== 'done' || !j.text) continue;
+      total++;
+      for (const w of TERMS) if (j.text.includes(w)) termCnt[w] = (termCnt[w] || 0) + 1;
+      if (/[\p{Extended_Pictographic}\uFE0F][\p{Extended_Pictographic}\uFE0F\s]*$/u.test(j.text.trim())) emojiEnd++;
+      if (j.action === 'patrolReply') { patrolN++; if (CTA_WORDS.some((w) => j.text.includes(w))) patrolCta++; }
+    }
+    if (total) {
+      const top3 = Object.entries(termCnt).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w}×${n}`).join('/') || '无';
+      lines.push(`\n🧬 回复多样性(24h)：称呼Top3 ${top3} ｜ emoji收尾 ${Math.round(emojiEnd / total * 100)}%（目标≤30%）｜ 巡逻CTA含量 ${patrolN ? Math.round(patrolCta / patrolN * 100) : 0}%（${patrolCta}/${patrolN}）`);
+    }
+  } catch { }
+
   // fullwin 常驻状态
   const rs = readJson(path.join(STATE_DIR, 'resident-fullwin.json'), null);
   const hbAge = rs && rs.heartbeatAt ? Math.round((Date.now() - Date.parse(rs.heartbeatAt)) / 60000) : -1;

@@ -329,7 +329,7 @@ if (WATCHDOG) {
   const st = loadSt();
   st.pid = process.pid; // 供 executor 守卫探活（resident-guard.js）与单实例判断
   // 跨日重置（10-21 修复 Codex 抓出的死代码：st.day 先设后查致 userReplies 永不重置）
-  if (st.day !== today()) { st.seenNotifs = {}; st.seenPosts = {}; st.lastCloudSlot = {}; st.userReplies = {}; st.day = today(); saveSt(st); }
+  if (st.day !== today()) { st.seenNotifs = {}; st.seenPosts = {}; st.lastCloudSlot = {}; st.userReplies = {}; st.termUse = {}; st.emojiDay = { n: 0, end: 0 }; st.day = today(); saveSt(st); }
   let aborted = false;
   const sendQueue = []; // {kind, statusId, postUrl, author, text, sendAt}
   // 10-20 拍板 24 小时制：进程全天在岗（至当日 23:59 自灭，00:05 由计划任务接替）；
@@ -339,6 +339,25 @@ if (WATCHDOG) {
   const userReplyCount = (author) => { st.userReplies = st.userReplies || {}; return (st.userReplies[(author || '').toLowerCase()] || 0); };
   const userReplyIncr = (author) => { st.userReplies = st.userReplies || {}; st.userRepliesTotal = st.userRepliesTotal || {}; const a = (author || '').toLowerCase(); st.userReplies[a] = (st.userReplies[a] || 0) + 1; st.userRepliesTotal[a] = (st.userRepliesTotal[a] || 0) + 1; saveSt(st); }; // Total 跨日不重置（关系分级用）
   const userCapOk = (author) => userReplyCount(author) < (RC.perUserReplyCapDay != null ? RC.perUserReplyCapDay : 3);
+  // ── 回复多样性控制（10-22 拍板 A/B/C，交付零影响设计）：A 称呼词日限 2/词=软偏好（降权重抽不拒发）；
+  // B emoji 收尾率>30% 时剥句尾 emoji（剥了照发不拒发）；C 同人语境递进（brief 注入"上次回他的是X"）；
+  // 全部只动文本层：不动量/不动帽/不动通过率
+  const ADDR_TERMS = ['老师', '老哥', '朋友', '兄弟', '兄dei', '大佬', '家人', '宝子', '哥们', '伙计'];
+  const termsIn = (t) => ADDR_TERMS.filter((w) => String(t || '').includes(w));
+  const cappedTerms = () => ADDR_TERMS.filter((w) => ((st.termUse || {})[w] || 0) >= 2);
+  const END_EMOJI = /[\p{Extended_Pictographic}\uFE0F][\p{Extended_Pictographic}\uFE0F\s]*$/u;
+  const endsEmoji = (t) => END_EMOJI.test(String(t || '').trim());
+  const stripEndEmoji = (t) => String(t || '').trim().replace(END_EMOJI, '').trim();
+  const emojiRateHigh = () => { const d = st.emojiDay || { n: 0, end: 0 }; return d.n >= 10 && d.end / d.n > 0.3; };
+  function noteReplyStyle(author, text) { // 发送成功时记多样性统计+同人语境
+    st.termUse = st.termUse || {}; st.emojiDay = st.emojiDay || { n: 0, end: 0 };
+    for (const w of termsIn(text)) st.termUse[w] = (st.termUse[w] || 0) + 1;
+    st.emojiDay.n++; if (endsEmoji(text)) st.emojiDay.end++;
+    st.lastReplyTo = st.lastReplyTo || {};
+    st.lastReplyTo[(author || '').toLowerCase()] = String(text || '').slice(0, 40);
+    const ks = Object.keys(st.lastReplyTo); if (ks.length > 200) for (const k of ks.slice(0, ks.length - 200)) delete st.lastReplyTo[k];
+    saveSt(st);
+  }
   // 防复读历史（10-21 修复：三处 history 恒空致相似度防线断线；环形缓冲 100 条，范本 planner.js）
   const pushReplyHistory = (text) => { st.replyHistory = st.replyHistory || []; st.replyHistory.push(String(text).slice(0, 120)); if (st.replyHistory.length > 100) st.replyHistory = st.replyHistory.slice(-100); saveSt(st); };
   const recentHistory = () => (st.replyHistory || []).slice(-8);
@@ -476,12 +495,17 @@ if (WATCHDOG) {
         }
         if (scene === 'greet') {
           const recentSet = new Set((st.replyHistory || []).slice(-24).concat((st.pendingInbox || []).map((x) => x.text)));
-          const tmpl = pickGreet(greetLabel, recentSet);
+          let tmpl = pickGreet(greetLabel, recentSet);
+          // A 称呼词日限（软偏好）：抽中的模板含今日已用够的称呼词就再抽两次，仍命中照发（不为这条丢回复）
+          for (let t = 0; t < 2 && tmpl && termsIn(tmpl).some((w) => cappedTerms().includes(w)); t++) tmpl = pickGreet(greetLabel, recentSet);
           if (tmpl) {
             const tc = quality.check(tmpl, { casual: true, history: st.replyHistory || [] });
             if (tc.ok && [...tc.cleaned].length <= (RC.greetHardLen || 12)) {
-              sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: tc.cleaned, sendAt: Date.now() + rand(...(scene === 'greet' ? [0.5, 1.5] : [1.5, 5])) * 60000 });
-              st.pendingInbox = (st.pendingInbox || []).concat([{ statusId, postUrl, author: it.author, text: tc.cleaned, sendAt: sendQueue[sendQueue.length - 1].sendAt }]);
+              // B emoji 收尾超限剥尾（剥了照发不拒发）
+              let out = tc.cleaned;
+              if (emojiRateHigh() && endsEmoji(out)) { const s = stripEndEmoji(out); if ([...s].length >= 3) out = s; }
+              sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: out, sendAt: Date.now() + rand(...(scene === 'greet' ? [0.5, 1.5] : [1.5, 5])) * 60000 });
+              st.pendingInbox = (st.pendingInbox || []).concat([{ statusId, postUrl, author: it.author, text: out, sendAt: sendQueue[sendQueue.length - 1].sendAt }]);
               st.seenNotifs[key] = nowIso(); saveSt(st); queued++; greetTpl++;
               continue; // 模板路径结束，不走 LLM
             }
@@ -494,7 +518,11 @@ if (WATCHDOG) {
         const target = scene === 'greet' ? `4-10 个字，像手机上顺手回的一句${greetLabel ? '（对方是' + greetLabel + '，可带上称呼）' : ''}；对方是${rel}` : `8-16 个字，一句话点到对方说的具体内容；对方是${rel}`;
         // 超长硬拒→重生成一次（保留原意压到上限，不是硬缩到极短）→仍超跳过
         // 10-21 bug3 修复：history 接真实环形缓冲（原恒空致防复读断线）；casual=true 放行无标点短句
-        const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人回应对方；回复 ${target}。风格参考（只学节奏不复用内容）：真人回复像随手打的——'哈哈，互相学习' '来了兄弟' '确实，这波我认'——口语、短促、不书面、不总结。`;
+        const brief = `这是一条对方发给我们（回复或提及）的消息，作为帖子主人回应对方；回复 ${target}。风格参考（只学节奏不复用内容）：真人回复像随手打的——'哈哈，互相学习' '来了兄弟' '确实，这波我认'——口语、短促、不书面、不总结。`
+          // C 同人语境递进：告知上次回他的是什么，换角度不重复套路
+          + (((st.lastReplyTo || {})[(it.author || '').toLowerCase()]) ? `你上次回他的是"${(st.lastReplyTo || {})[(it.author || '').toLowerCase()]}"——换个角度接着聊，别重复套路。` : '')
+          // A 称呼词日限（LLM 路径）：今天用够的词直接禁
+          + (cappedTerms().length ? `今天"${cappedTerms().join('、')}"这些称呼已用够，开头别带称呼词。` : '');
         let r = await generateReply({ post: it.txt, author: it.author, persona: (CFG.personas || {})[ACCOUNT], brief, history: recentHistory(), channel: RC.llmChannel, maxLen: hardCap, fallbackProvider: RC.llmFallback }).catch(() => null);
         let qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [], casual: true }) : null;
         if (qc && qc.ok && visLen(qc.cleaned) > hardCap) {
@@ -504,8 +532,11 @@ if (WATCHDOG) {
         }
         if (qc && qc.ok && visLen(qc.cleaned) > hardCap) { audit({ action: 'replyLen', target: it.author, note: `${scene}仍超长跳过(${visLen(qc.cleaned)}字)` }); st.seenNotifs[key] = nowIso(); saveSt(st); continue; }
         if (qc && qc.ok) {
-          sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: qc.cleaned, sendAt: Date.now() + rand(RC.replyDelayMin[0], RC.replyDelayMin[1]) * 60000 });
-          st.pendingInbox = (st.pendingInbox || []).concat([{ statusId, postUrl, author: it.author, text: qc.cleaned, sendAt: sendQueue[sendQueue.length - 1].sendAt }]); saveSt(st); // 10-21 bug5：待发持久化，重启不丢
+          // B emoji 收尾超限剥尾（剥了照发不拒发）
+          let out = qc.cleaned;
+          if (emojiRateHigh() && endsEmoji(out)) { const s = stripEndEmoji(out); if ([...s].length >= 3) out = s; }
+          sendQueue.push({ kind: 'replyInbox', statusId, postUrl, author: it.author, text: out, sendAt: Date.now() + rand(RC.replyDelayMin[0], RC.replyDelayMin[1]) * 60000 });
+          st.pendingInbox = (st.pendingInbox || []).concat([{ statusId, postUrl, author: it.author, text: out, sendAt: sendQueue[sendQueue.length - 1].sendAt }]); saveSt(st); // 10-21 bug5：待发持久化，重启不丢
           st.seenNotifs[key] = nowIso(); saveSt(st);
           queued++;
         } else { audit({ action: 'replyGen', note: `@${it.author} 生成未过门(${qc ? qc.reason : 'LLM失败'})` }); st.seenNotifs[key] = nowIso(); saveSt(st); }
@@ -544,14 +575,17 @@ if (WATCHDOG) {
         // 价值预判（10-21 批3②）：灌水帖不硬凑
         const worth = await judgeWorthiness({ post: p.text, author: p.author }).catch(() => '值');
         if (worth === '不值') { audit({ action: 'patrolSkip', target: p.author, note: '价值预判：灌水/零信息' }); continue; }
-        const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: '这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注、常来往（不要声称已关注）。', history: recentHistory(), channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
+        // 10-22 拍板文案规则：CTA 轮换池（25% 无 CTA 直接收尾）；禁回访/串门/回踩类承诺（两号无串门模块）；教师爷刹车（不评判对方运营）
+        const CTA_POOL = ['收尾自然带一句"常来往"类互动引导', '收尾带"评论区接着聊"类引导', '收尾带"互相关注"类引导', '收尾不带任何引导，内容说完就收'];
+        const cta = CTA_POOL[randi(0, CTA_POOL.length - 1)];
+        const r = await generateReply({ post: p.text, author: p.author, persona: (CFG.personas || {})[ACCOUNT], brief: `这是互关话题帖；真诚回应他帖子的具体内容，自然表达希望互相关注（不要声称已关注）。${cta}。禁止承诺"回访/串门/回踩"（我们不去别人主页互动）。只聊内容和盘面：不给对方的账号运营提建议、不评判对方怎么运营。`, history: recentHistory(), channel: RC.llmChannel, fallbackProvider: RC.llmFallback }).catch(() => null);
         const qc = r && r.text ? quality.check(r.text, { history: st.replyHistory || [] }) : null;
         if (!(qc && qc.ok)) { audit({ action: 'patrolGen', target: p.author, note: `生成未过门(${qc ? qc.reason : 'LLM失败'})，跳过` }); continue; }
         if (DRY) { LOG(`[DRY] 应评论 @${p.author}: ${qc.cleaned.slice(0, 30)}…`); continue; }
         // 动作隔离（10-20 用户建议）：每个动作独立临时页+用完即关，与搜索页状态彻底解耦；瞬态错误重试一次
         const postUrl = 'https://x.com' + (p.link || ('/i/web/status/' + p.id));
         let rr = await withTempPage(browser, (pg) => retryTransient(() => replyOnPage(pg, p.id, postUrl, qc.cleaned, { srcLen: [...(p.text || '')].length, targetHandle: p.author })));
-        if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(p.author); pushReplyHistory(qc.cleaned); queueVerify({ text: qc.cleaned, statusId: p.id, target: p.author, source: 'patrolReply' }); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
+        if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(p.author); pushReplyHistory(qc.cleaned); noteReplyStyle(p.author, qc.cleaned); queueVerify({ text: qc.cleaned, statusId: p.id, target: p.author, source: 'patrolReply' }); audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: rr.ok ? 'done' : 'unknown', text: qc.cleaned.slice(0, 40) }); }
         else audit({ action: 'patrolReply', target: p.author, statusId: p.id, status: 'failed', note: rr.note });
         if (rr.ok && usedToday('follow') < RC.followCapDay) {
           const fo = await withTempPage(browser, (pg) => retryTransient(() => followOnPage(pg, p.author)));
@@ -571,7 +605,7 @@ if (WATCHDOG) {
       const r = await generateReply({
         post: mat || '（暂无话题素材）',
         persona: (CFG.personas || {})[ACCOUNT],
-        brief: `写一条互关帖正文：一两句话表明认真做交易/看盘的人求互相关注、必回访；可参考但不得照抄话题里别人帖子的说法；正文结尾用句号，不要写任何 # 标签（系统会自动附加固定标签组）。40~100 字。`,
+        brief: `写一条互关帖正文：一两句话表明认真做交易/看盘的人求互相关注；承诺只写真做到的"留言必回、互关的会回关"，禁止"回访/回踩/去你主页"类承诺（我们不去别人主页）；可参考但不得照抄话题里别人帖子的说法；正文结尾用句号，不要写任何 # 标签（系统会自动附加固定标签组）。40~100 字。`,
         history: [], channel: RC.llmChannel,
       }).catch(() => null);
       const qc = r && r.text ? quality.check(r.text, {}) : null;
@@ -675,7 +709,7 @@ if (WATCHDOG) {
             const risk = await riskToast(pg).catch(() => null); // 页关前读走 toast
             return { ...r2, risk };
           }).catch((e) => ({ ok: false, note: 'EXC:' + String(e.message).slice(0, 50) }));
-          if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(q.author); pushReplyHistory(q.text); queueVerify({ text: q.text, statusId: q.statusId, target: q.author, source: 'inboxReply' }); audit({ action: 'inboxReply', target: q.author, statusId: q.statusId, postUrl: q.postUrl, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
+          if (rr.ok || rr.unknown) { ledgerRecord('reply'); userReplyIncr(q.author); pushReplyHistory(q.text); noteReplyStyle(q.author, q.text); queueVerify({ text: q.text, statusId: q.statusId, target: q.author, source: 'inboxReply' }); audit({ action: 'inboxReply', target: q.author, statusId: q.statusId, postUrl: q.postUrl, status: rr.ok ? 'done' : 'unknown', text: q.text.slice(0, 40) }); }
           else audit({ action: 'inboxReply', target: q.author, statusId: q.statusId, postUrl: q.postUrl, status: 'failed', note: rr.note });
           st.pendingInbox = (st.pendingInbox || []).filter((x) => !(x.statusId === q.statusId && x.text === q.text)); saveSt(st);
           // 光速回关（10-22 拍板方案A）：回复先发出（速度不受影响），随后顺带判定回关

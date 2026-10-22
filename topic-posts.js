@@ -106,12 +106,26 @@ async function collectMaterial() {
 }
 
 // ② 生成一条（质量门不过重生一次，仍不过跳过该槽）
-async function genOne(point, material) {
+// 10-22 拍板文案规则：承诺白名单制——只许承诺已上线动作（留言必回/互关回关），
+// 禁"回访/回踩/去你主页"类我们去别人主页的承诺（两号无串门模块）；保留"来串门/来留言"（请对方来=真话）。
+// 留言引导成分（X 互相回复权重提高）：每槽 25% 掷骰且不连槽，四角度轮换防重复
+const ENGAGE_ANGLES = [
+  '邀请大家来评论区留言，明说"留言的优先回关"',
+  '请大家在评论区报到冒泡，你会挨个回',
+  '抛一个盘面/交易相关的小问题请大家评论区回答，你挨个回',
+  '用"昨天评论区聊出好几个同频的"这种晒互动的口吻，吸引新人来留言',
+];
+const PROMISE_RULE = '承诺只写真做到的："留言必回、互关的会回关"；禁止"回访/回踩/去你主页看/上门串门"这类我们去别人主页的承诺（没这动作），可以说"欢迎来串门/来留言"（请对方来）';
+async function genOne(point, material, engage, history) {
   const mat = material.slice(0, 10).map((m) => `- @${m.author}: ${m.text.slice(0, 60)}`).join('\n');
-  const brief = `写一条互关帖正文（${TONE(point % 24)}）；一两句话表明认真做交易/看盘的人求互相关注、必回访；可借话题池语气但不得照抄；结尾句号；不要写任何 # 标签（系统会自动附加）。40~100 字。参考池：\n${mat}`;
+  const angle = ENGAGE_ANGLES[Math.floor(Math.random() * ENGAGE_ANGLES.length)];
+  const core = engage
+    ? `核心诉求=引导留言互动（${angle}），顺带自然带一句互关`
+    : '一两句话表明认真做交易/看盘的人求互相关注';
+  const brief = `写一条互关帖正文（${TONE(point % 24)}）；${core}；${PROMISE_RULE}；可借话题池语气但不得照抄；结尾句号；不要写任何 # 标签（系统会自动附加）。40~100 字。参考池：\n${mat}`;
   for (let i = 0; i < 2; i++) {
-    const r = await generateReply({ post: mat || '（参考池为空）', persona: (CFG.personas || {})[ACCOUNT], brief, history: [], channel: TC.llmChannel }).catch(() => null);
-    const qc = r && r.text ? quality.check(r.text, {}) : null;
+    const r = await generateReply({ post: mat || '（参考池为空）', persona: (CFG.personas || {})[ACCOUNT], brief, history: history || [], channel: TC.llmChannel }).catch(() => null);
+    const qc = r && r.text ? quality.check(r.text, { history: history || [] }) : null;
     if (qc && qc.ok) return (qc.cleaned || '').trim().replace(/[＃#][^\s＃#，。！？、]+/g, '').trim();
     LOG(`  ${point}点槽 生成未过门(${qc ? qc.reason : 'LLM失败'})${i === 0 ? '，重生一次' : ''}`);
   }
@@ -142,15 +156,23 @@ async function genOne(point, material) {
   entries.sort((a, b) => a.postAt - b.postAt);
 
   const qFile = path.join(QUEUE_DIR, `${today()}-topic-${ACCOUNT}.json`);
+  // 防复读 history：昨天+今天已生成的互关帖正文（10-22 文案多样化拍板）
+  const hist = [];
+  for (const d of [today(), new Date(Date.now() - 86400000).toLocaleDateString('sv-SE')]) {
+    try { for (const e of JSON.parse(fs.readFileSync(path.join(QUEUE_DIR, `${d}-topic-${ACCOUNT}.json`), 'utf8'))) hist.push(String(e.text || '').slice(0, 120)); } catch { }
+  }
   const queue = [];
+  let lastEngage = false; // 留言引导不连槽（10-22 拍板：部分带，25% 掷骰）
   for (let i = 0; i < entries.length; i++) {
     const { point, postAt } = entries[i];
-    LOG(`生成 ${point} 点槽（定时 ${new Date(postAt).toTimeString().slice(0, 5)}）…`);
-    const body = await genOne(point, material);
+    const engage = !lastEngage && Math.random() < 0.25;
+    LOG(`生成 ${point} 点槽（定时 ${new Date(postAt).toTimeString().slice(0, 5)}${engage ? '，留言引导' : ''}）…`);
+    const body = await genOne(point, material, engage, hist.concat(queue.map((e) => e.text)));
     if (!body) { audit({ action: 'topicGen', status: 'skipped', note: `${point}点槽两次未过门` }); continue; }
     const text = body + '\n\n' + TC.postTags.join(' ');
-    if (DRY) { LOG(`[DRY] ${point}点槽: ${text.slice(0, 60)}…`); continue; }
-    queue.push({ id: `${today()}-topic-${ACCOUNT}-${i + 1}`, account: ACCOUNT, type: 'post', kind: 'topic-post', text, window: 'topic', postAt: new Date(postAt).toISOString(), status: 'planned', createdAt: nowIso(), ttlMin: 1440 }); // ttlMin 1440（10-22 修复）：预制帖生命周期全天（末槽距 createdAt ~18h），executor 通用 300min 是运营窗队列安全网，曾把 10:50 后全部槽误判 TTL 过期
+    if (DRY) { LOG(`[DRY] ${point}点槽${engage ? '[留言引导]' : ''}: ${text.slice(0, 60)}…`); lastEngage = engage; continue; }
+    queue.push({ id: `${today()}-topic-${ACCOUNT}-${i + 1}`, account: ACCOUNT, type: 'post', kind: 'topic-post', text, window: 'topic', postAt: new Date(postAt).toISOString(), status: 'planned', createdAt: nowIso(), ttlMin: 1440, engage: engage || undefined }); // ttlMin 1440（10-22 修复）：预制帖生命周期全天（末槽距 createdAt ~18h），executor 通用 300min 是运营窗队列安全网，曾把 10:50 后全部槽误判 TTL 过期
+    lastEngage = engage;
   }
   if (DRY) { LOG(`[DRY] 共 ${entries.length} 槽预览完毕，不写队列不拉起`); process.exit(0); }
   if (!queue.length) { audit({ action: 'topicGen', status: 'failed', note: '全部槽未过质量门，当天不发' }); process.exit(1); }
